@@ -79,6 +79,73 @@ class SkipPathGZip:
 
 app.add_middleware(SkipPathGZip, minimum_size=1024)
 
+
+# ---------------------------------------------------------------- 共享访问闸
+class SharedGate:
+    """内网穿透/分享时的一道共享口令闸。
+
+    为什么要有：这个站在设计上是「单机自用」—— 没有账号、没有任何鉴权，
+    拿到地址就能读写全部数据、能替你的模型账号花钱。一旦用 frp/nps 穿透出去
+    给第一批用户试用，那道「本机回环」的隐形保护就没了。
+
+    怎么才算通过（任一）：
+      · 请求来自本机回环（127.0.0.1 / ::1）—— 自己电脑上打开不受影响；
+      · 带对了口令：?token=xxx 或 X-Study-Key: xxx。
+    口令从 config.SHARED_TOKEN 读；**空字符串 = 不启用**（纯本机时的默认），
+    启用与否只影响「非本机」的请求，本机永远放行。
+
+    静态资源与公开探测（/api/health）不拦：穿透客户端要先探活，
+    页面本身也要能加载出来才谈得上输口令。
+    """
+
+    OPEN_PREFIX = ("/assets/", "/img/", "/noteimg/", "/stream/", "/media/",
+                   "/shots/", "/favicon", "/app-dist/")
+    OPEN_EXACT = ("/api/health",)
+
+    def __init__(self, app):
+        self.app = app
+
+    def _is_local(self, host):
+        h = (host or "").split(":")[0]
+        return h in ("127.0.0.1", "localhost", "::1", "0.0.0.0")
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        token = (getattr(config, "SHARED_TOKEN", "") or "").strip()
+        if not token:
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path") or "/"
+        if path in self.OPEN_EXACT or any(path.startswith(p) for p in self.OPEN_PREFIX):
+            await self.app(scope, receive, send)
+            return
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1")
+                   for k, v in (scope.get("headers") or [])}
+        client = (scope.get("client") or ("", 0))[0]
+        given = headers.get("x-study-key") or ""
+        if not given:
+            qs = (scope.get("query_string") or b"").decode("latin-1")
+            for kv in qs.split("&"):
+                if kv.startswith("token="):
+                    from urllib.parse import unquote_plus
+                    given = unquote_plus(kv[6:])
+                    break
+        if self._is_local(client) or (given and given == token):
+            await self.app(scope, receive, send)
+            return
+        body = ('{"ok":false,"error":"需要访问口令",'
+                '"detail":"这是私人在用的学习站。请用带 token 的链接打开，'
+                '或在请求头带上 X-Study-Key。"}').encode("utf-8")
+        await send({"type": "http.response.start", "status": 401,
+                    "headers": [(b"content-type", b"application/json; charset=utf-8"),
+                                (b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+
+
+app.add_middleware(SharedGate)
+
 store.init()
 datahub.seed_legacy_mem()
 
