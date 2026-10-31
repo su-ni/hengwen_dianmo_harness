@@ -27,13 +27,16 @@ const LazyAgent = lazy(() => import('./pages/Agent').then((m) => ({ default: m.A
 const LazyCanvas = lazy(() => import('./pages/Canvas').then((m) => ({ default: m.Canvas })))
 const LazyShots = lazy(() => import('./pages/Shots').then((m) => ({ default: m.Shots })))
 const LazySearch = lazy(() => import('./pages/Search').then((m) => ({ default: m.Search })))
+/* 全局首屏（工作区列表 + 一个能聊的框）。它是两级结构的第一级：
+   index → 点工作区 → 进 home（原课程主页）及以下各页。 */
+const LazyIndex = lazy(() => import('./pages/Home').then((m) => ({ default: m.Home })))
 
 const KEY = 'sd_page'
 const SID_KEY = 'sd_sid'
 /* 这个数组是「哪些页能活下来」的白名单：hash 变了会走 initPage()，
    名单里没有的页会被当场弹回去（新增页面忘了加，表现就是「点了没反应」）。
    加 PageKey 的时候必须同步这里。 */
-const PAGES: PageKey[] = ['home', 'today', 'classroom', 'courses', 'schedule', 'vocab',
+const PAGES: PageKey[] = ['index', 'home', 'today', 'classroom', 'courses', 'schedule', 'vocab',
   'practice', 'notes', 'notesAll', 'exam', 'stats', 'writing', 'agent', 'canvas', 'shots',
   'search']
 
@@ -65,12 +68,17 @@ function initPage(): PageKey {
   if (PAGES.indexOf(h as PageKey) >= 0) return h as PageKey
   const s = localStorage.getItem(KEY)
   if (s && PAGES.indexOf(s as PageKey) >= 0) return s as PageKey
-  return 'home'
+  /* 第一次打开就停在全局首屏：先问「在哪个学习任务里」，
+     而不是直接把人扔进课程主页（那是单任务时代的样子）。 */
+  return 'index'
 }
 
 export function App() {
   const [base, setBase] = useState<Base | null>(null)
   const [bootErr, setBootErr] = useState<string | null>(null)
+  /* 默认进哪一页：没进过工作区就停在全局首屏（index）。
+     以前一进来就是课程主页 —— 那是「只有一个学习任务」时代的样子，
+     现在得先知道人在哪个工作区里。 */
   const [page, setPage] = useState<PageKey>(initPage)
   /* 当前科目是全局的：左栏「课程」一组、课程主页、课堂、练习都读同一个值。
      以前每个页面自己藏一个 sid，切页就忘、还互相打架（课堂选的计算机，
@@ -218,6 +226,24 @@ export function App() {
     setPage(p)
   }
 
+  /* 进一个工作区：先告诉后端「当前是它」（会话、计划、科目都跟着这个 id 走），
+     再刷新一次 base（科目/进度/计划按工作区重算），最后切到课程主页。
+     失败不静默：把错误塞进 bootErr，界面会显示「连不上/切不过去」的原因。 */
+  const openWs = async (wid: string) => {
+    try {
+      const r = await fetch('/api/ws/' + encodeURIComponent(wid) + '/select',
+        { method: 'POST' }).then((x) => x.json())
+      if (!r?.ok) { setBootErr(r?.error || '切不到这个工作区'); return }
+      const d = await loadBase(true)
+      setBase(d)
+      const subs: any[] = (d as any)?.subjects ?? []
+      if (subs.length && !subs.some((s) => s.id === sid)) setSid(subs[0].id)
+      setPage('home')
+    } catch (e: any) {
+      setBootErr(String(e?.message || e))
+    }
+  }
+
   /* ↓↓↓ 这几个 hook 必须放在下面那两个提前 return 之前。
      React 靠「hook 的调用顺序」认钩子：同一渲染里第 1 个 useState 永远是同一个。
      一旦 early return 走了「少调用几个 hook」的那条分支，下一次渲染回来时
@@ -273,7 +299,17 @@ export function App() {
         onSubmit={runSearch}
       />
     ) : null}
+    {/* 全局首屏不吃壳：它本身就是「第一层」（工作区列表 + 一个框）。
+        套上左栏图标条会变成「两级壳套在一起」——左栏那 13 个图标在没有工作区时
+        一个都点不出内容。 */}
+    {page === 'index' ? (
+      <Suspense fallback={<div style={{ padding: 40 }} className="muted">正在读本机数据…</div>}>
+        <LazyIndex base={base} onOpen={openWs} onGo={(p: any) => setPage(p)} />
+      </Suspense>
+    ) : (
     <Shell page={page} onGo={go} base={base} sid={sid} onSid={(id) => { setSid(id); setPage('home') }}
+      onHome={() => setPage('index')}
+      wsName={((base as any)?.ws || {}).name}
       topRight={page === 'canvas' ? canvasTop : undefined}
       searchQ={searchQ}
       /* 弹窗开着时把顶栏那只藏掉：同屏两只搜索框，人会分不清往哪打。
@@ -314,6 +350,7 @@ export function App() {
         </Suspense>
       </div>
     </Shell>
+    )}
     </>
   )
 }

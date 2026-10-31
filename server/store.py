@@ -276,6 +276,17 @@ def init(db_path=None):
         con.executescript(_SCHEMA)
         ensure_sync_columns(con)
         _backfill_answer_source(con)   # schema 落下来之后才谈得上回填
+        # 工作区（最高层实体）：建表 + 老库幂等迁移。放最后，因为它要读
+        # plan.json、还要 ALTER sessions，得等上游 schema 齐了才动。
+        try:
+            from . import workspaces
+            workspaces.init(con)
+        except Exception as e:
+            # 迁移失败不能让整站起不来：记下原因，界面按「没有工作区」走
+            try:
+                kv_set("ws.init_error", "%s: %s" % (type(e).__name__, e))
+            except Exception:
+                pass
         con.commit()
     finally:
         con.close()

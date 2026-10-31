@@ -6,7 +6,7 @@ import { type Base } from '../lib/api'
 import { useTool } from '../lib/useTool'
 
 export type PageKey =
-  | 'home' | 'today' | 'classroom' | 'courses' | 'schedule' | 'vocab'
+  | 'index' | 'home' | 'today' | 'classroom' | 'courses' | 'schedule' | 'vocab'
   | 'practice' | 'notes' | 'notesAll' | 'exam' | 'stats' | 'writing' | 'agent' | 'canvas' | 'shots'
   | 'search'
 
@@ -77,6 +77,7 @@ export const TITLES: Record<PageKey, { kick: string; h1: string; sub: string }> 
   canvas: { kick: '画布', h1: '笔记画布', sub: '导图存在本机，可拉 XMind / Obsidian 等来源' },
   shots: { kick: '截图库', h1: '截过的每一帧', sub: '课堂按 S 存的帧、画布导出的图、上传的图 —— 按科目和关键词找得到' },
   search: { kick: '搜索', h1: '全局搜索', sub: '页面 / 能力 / 题考点词 / 语义 / 本机文件 / AI 会话 —— 一路并排' },
+  index: { kick: '工作区', h1: '工作区', sub: '' },
 }
 
 function coverOf(s: any): string {
@@ -129,7 +130,7 @@ function TopSearch({ page, initial, big }: { page: PageKey; initial?: string; bi
 }
 
 export function Shell({
-  page, onGo, base, children, topRight, sid, onSid, searchQ, hideSearch,
+  page, onGo, base, children, topRight, sid, onSid, searchQ, hideSearch, onHome, wsName,
 }: {
   page: PageKey
   /* entry 说明「这一次是从哪条路进去的」：顶栏胶囊 = tab，左栏图标 = rail。
@@ -140,6 +141,10 @@ export function Shell({
   topRight?: React.ReactNode
   sid?: string
   onSid?: (id: string) => void
+  /* 点左上角「研」回全局首屏（工作区列表）。 */
+  onHome?: () => void
+  /* 现在在哪个工作区 —— 顶栏要标出来，否则进了工作区就像进了无名之地。 */
+  wsName?: string
   /* 搜索页顶栏那只框要显示「当前搜的词」，由 App 传下来。 */
   searchQ?: string
   /* 什么时候藏掉顶栏框：目前只有「Ctrl+F 弹窗开着」那一下 ——
@@ -176,7 +181,8 @@ export function Shell({
   return (
     <div className="app app-mn app-icons">
       <aside className="rail rail-icons">
-        <div className="lg" title="研学台 StudyDeck">研</div>
+        <div className="lg" title="研学台 StudyDeck" onClick={() => onHome && onHome()}
+          style={onHome ? { cursor: 'pointer' } : undefined}>研</div>
         <nav className="railnav">
           {ICON_NAV.map((it) => (
             <button key={it.k} className={'rb' + (page === it.k ? ' on' : '')}
@@ -230,6 +236,7 @@ export function Shell({
             <div className="tplain">
               <span className="dot" aria-hidden="true"
                 style={{ background: cur ? clsColor(cur.cls || cur.accent || cur.id) : 'var(--tx3)' }} />
+              {wsName ? <span className="tws" title="当前工作区">{wsName}</span> : null}
               {t.kick}
             </div>
           )}
