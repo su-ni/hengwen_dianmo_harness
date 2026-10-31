@@ -189,6 +189,19 @@ def _base_payload(full=False):
     d["tools"] = tools.registry_public()      # 工具注册表（Agent 工具台要用）
     d["confirm_tools"] = sorted(config.CONFIRM_TOOLS)
     d["brand"] = {"title": config.APP_TITLE, "subtitle": config.APP_SUBTITLE}
+    # 工作区：左栏列表 + 当前那个。没有工作区时 ws=None，前端走引导。
+    # 注意 ETag 口径：这段随数据变，进了指纹才是对的（建了工作区就换包）。
+    try:
+        from . import workspaces as _wsm
+        con = store.connect()
+        try:
+            d["workspaces"] = _wsm.all_(con)
+            d["ws"] = _wsm.current(con)
+        finally:
+            con.close()
+    except Exception as e:
+        d["workspaces"], d["ws"] = [], None
+        d["ws_error"] = "%s: %s" % (type(e).__name__, e)
     return d
 
 
@@ -256,11 +269,168 @@ async def api_perm_set(request: Request):
             "error": r.get("error")}
 
 
+@app.get("/api/ws")
+def api_ws_list():
+    """全部工作区 + 当前那个。左栏与首屏用它。"""
+    from . import workspaces as wsm
+    con = store.connect()
+    try:
+        return {"ok": True, "items": wsm.all_(con), "current": wsm.current(con)}
+    finally:
+        con.close()
+
+
+@app.post("/api/ws")
+async def api_ws_create(request: Request):
+    """新建工作区。
+
+    参数都可缺：name 为空就「未命名工作区」；subjects 传 [] 就是空工作区。
+    **不替用户编 exam_date** —— 访谈问出来的才写，没问就是 null（排课自己兜底）。
+    """
+    from . import workspaces as wsm
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    con = store.connect()
+    try:
+        ws = wsm.create(con, body.get("name"), kind=body.get("kind") or "study",
+                        exam_date=body.get("exam_date"),
+                        minutes_per_day=body.get("minutes_per_day"),
+                        vocab_minutes=body.get("vocab_minutes"),
+                        icon=body.get("icon"),
+                        subjects=body.get("subjects") or [],
+                        modules=body.get("modules"))
+        if body.get("select", True):
+            wsm.set_current(con, ws["id"])
+        return {"ok": True, "ws": ws}
+    finally:
+        con.close()
+
+
+@app.get("/api/ws/{wid}")
+def api_ws_one(wid: str):
+    from . import workspaces as wsm
+    con = store.connect()
+    try:
+        ws = wsm.one(con, wid)
+        return {"ok": bool(ws), "ws": ws, "error": "" if ws else "没有这个工作区"}
+    finally:
+        con.close()
+
+
+@app.post("/api/ws/{wid}")
+async def api_ws_update(wid: str, request: Request):
+    """改工作区：名字 / 考试日期 / 每日时长 / 模块开关 / 归档。"""
+    from . import workspaces as wsm
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    con = store.connect()
+    try:
+        kw = {k: v for k, v in (body or {}).items()
+              if k in ("name", "kind", "icon", "exam_date", "minutes_per_day",
+                       "vocab_minutes", "archived")}
+        if "modules" in (body or {}):
+            kw["modules"] = body.get("modules") or []
+        if "subjects" in (body or {}):
+            wsm.set_subjects(con, wid, body.get("subjects") or [])
+        ws = wsm.update(con, wid, **kw) if kw else wsm.one(con, wid)
+        return {"ok": bool(ws), "ws": ws, "error": "" if ws else "没有这个工作区"}
+    finally:
+        con.close()
+
+
+@app.post("/api/ws/{wid}/select")
+def api_ws_select(wid: str):
+    from . import workspaces as wsm
+    con = store.connect()
+    try:
+        ok = wsm.set_current(con, wid)
+        return {"ok": ok, "current": wsm.current(con),
+                "error": "" if ok else "没有这个工作区"}
+    finally:
+        con.close()
+
+
+@app.delete("/api/ws/{wid}")
+def api_ws_delete(wid: str, files: int = 0):
+    """删工作区。默认不删磁盘目录 —— 误删不可逆，文件留着能找回。"""
+    from . import workspaces as wsm
+    con = store.connect()
+    try:
+        wsm.delete(con, wid, drop_files=bool(files))
+        cur = wsm.current(con)
+        if not cur:
+            store.kv_set("ws.current", "")
+        return {"ok": True, "current": cur}
+    finally:
+        con.close()
+
+
+@app.get("/api/ws/{wid}/plans")
+def api_ws_plans(wid: str):
+    from . import workspaces as wsm
+    con = store.connect()
+    try:
+        return {"ok": True, "items": wsm.plan_docs(con, wid)}
+    finally:
+        con.close()
+
+
+@app.post("/api/ws/{wid}/plans")
+async def api_ws_plan_add(wid: str, request: Request):
+    """落一份计划文档（计划模式的产出物，markdown 存工作区目录）。"""
+    from . import workspaces as wsm
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    con = store.connect()
+    try:
+        if not wsm.one(con, wid):
+            return {"ok": False, "error": "没有这个工作区"}
+        d = wsm.plan_doc_add(con, wid, body.get("title") or "计划",
+                             body.get("body") or "", status=body.get("status") or "draft")
+        return {"ok": True, "doc": d}
+    finally:
+        con.close()
+
+
+@app.get("/api/plan-doc/{pid}")
+def api_plan_doc(pid: str):
+    from . import workspaces as wsm
+    con = store.connect()
+    try:
+        d = wsm.plan_doc_read(con, pid)
+        return {"ok": bool(d), "doc": d, "error": "" if d else "没有这份计划"}
+    finally:
+        con.close()
+
+
+@app.post("/api/plan-doc/{pid}/status")
+async def api_plan_doc_status(pid: str, request: Request):
+    """批准 / 丢弃 / 完成。状态机：draft→approved→done，或 draft→dropped。"""
+    from . import workspaces as wsm
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    st = (body or {}).get("status") or ""
+    if st not in ("draft", "approved", "done", "dropped"):
+        return {"ok": False, "error": "状态只能是 draft/approved/done/dropped"}
+    con = store.connect()
+    try:
+        d = wsm.plan_doc_set_status(con, pid, st)
+        return {"ok": bool(d), "doc": d, "error": "" if d else "没有这份计划"}
+    finally:
+        con.close()
+
+
 @app.post("/api/tool/{name}")
 async def api_tool(name: str, request: Request):
-    """跑一个工具（非流式）。
-
-    tools.call 是**同步**的，而且很多工具本来就要跑好几秒（explain_coverage 实测
+    """跑一个工具（非流式）。    tools.call 是**同步**的，而且很多工具本来就要跑好几秒（explain_coverage 实测
     6–7 秒、intake_pick 核课要几十秒）。直接在 async 里调它，整个事件循环在这几秒里
     一个请求都发不出去：实测那 6.2 秒里 /api/health 全部排在 6.3 秒才回，页面
     看起来就是「整站卡死」。所以丢进线程池 —— 一条慢工具只该占住它自己那条连接。

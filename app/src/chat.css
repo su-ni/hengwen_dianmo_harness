@@ -866,3 +866,176 @@
   background: rgba(255, 176, 32, .06);
   color: var(--act); font-size: 11.5px; text-align: center;
 }
+
+/* ================= 全局首屏（工作区列表 + 一个能聊的框）=================
+   这一页不套壳：它自己就是第一层。垂直分三段 —— 顶栏（品牌 + 新建）、
+   中段（工作区卡片，没有就一句招呼）、底部吸着输入框。
+   空白态与「已有工作区」共用一套 DOM，只换中段内容，不做两套模板。 */
+.ghome {
+  display: flex; flex-direction: column;
+  height: 100%; min-height: 0;
+  background: var(--bg); color: var(--tx);
+}
+.gh-head {
+  flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 14px 22px; border-bottom: 1px solid var(--line);
+}
+.gh-logo { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.gh-logo b { font-weight: 700; letter-spacing: .2px; }
+.gh-logo em { font-style: normal; font-size: 11px; color: var(--tx3); letter-spacing: .6px; }
+.gh-mark {
+  width: 24px; height: 24px; border-radius: 7px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(150deg, var(--act), #d2791a);
+  color: var(--onact); font-size: 13px; font-weight: 800;
+}
+.gh-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 26px 22px 8px; }
+.ghome.is-empty .gh-body { display: flex; align-items: center; justify-content: center; }
+
+.gh-hero { text-align: center; max-width: 560px; }
+.gh-hero h1 { font-size: 25px; font-weight: 700; margin: 0 0 10px; letter-spacing: .2px; }
+.gh-hero p { margin: 0; color: var(--tx2); font-size: 13.5px; line-height: 1.7; }
+
+.gh-sec {
+  display: flex; align-items: baseline; gap: 10px;
+  margin: 0 0 12px; font-size: 12px;
+}
+.gh-sec b { font-size: 13px; font-weight: 700; }
+.gh-note { color: var(--tx3); font-size: 11.5px; }
+
+.gh-cards {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+  max-width: 1080px;
+}
+.wscard {
+  text-align: left; cursor: pointer;
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 14px 15px 12px;
+  border: 1px solid var(--line2); border-radius: 12px;
+  background: var(--card2); color: var(--tx);
+  transition: .16s var(--ease);
+}
+.wscard:hover { border-color: var(--act); transform: translateY(-1px); }
+.wscard.on { border-color: var(--act); box-shadow: 0 0 0 2px rgba(255, 176, 32, .12); }
+.wsc-top { display: flex; align-items: center; gap: 8px; }
+.wsc-k {
+  font-size: 10.5px; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--line2); color: var(--tx3);
+}
+.wsc-d { margin-left: auto; font-size: 11px; color: var(--tx2); }
+.wsc-d.near { color: var(--bad, #d55); font-weight: 600; }
+.wsc-n { font-size: 15px; font-weight: 650; line-height: 1.35; }
+.wsc-m { font-size: 11.5px; color: var(--tx3); min-height: 16px; }
+.wsc-f {
+  display: flex; gap: 12px; margin-top: 2px; padding-top: 8px;
+  border-top: 1px dashed var(--line); font-size: 11px; color: var(--tx3);
+}
+
+.gh-recent { margin-top: 26px; max-width: 640px; }
+.gh-srow {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  padding: 7px 9px; margin-bottom: 3px;
+  border: 0; border-radius: 7px; background: transparent;
+  color: var(--tx2); font-size: 12.5px; text-align: left; cursor: pointer;
+}
+.gh-srow:hover { background: var(--card2); color: var(--tx); }
+.gh-srow span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gh-srow em { font-style: normal; font-size: 10.5px; color: var(--tx3); }
+
+.gh-reply {
+  max-width: 780px; margin: 22px auto 0;
+  border: 1px solid var(--line2); border-radius: 12px;
+  background: var(--card2); padding: 12px 14px;
+}
+.gh-reply .who { font-size: 10.5px; color: var(--act); letter-spacing: .5px; }
+.gh-reply pre {
+  margin: 7px 0 0; white-space: pre-wrap; word-break: break-word;
+  font: inherit; font-size: 13px; line-height: 1.7; color: var(--tx);
+}
+.gh-err {
+  max-width: 780px; margin: 14px auto 0; padding: 9px 12px;
+  border: 1px solid rgba(221, 85, 85, .45); border-radius: 9px;
+  color: var(--bad, #d55); font-size: 12.5px;
+}
+
+.gh-dock { flex: none; padding: 10px 22px 20px; }
+.gh-box {
+  width: 100%; max-width: 780px; margin: 0 auto;
+  background: var(--card2); border: 1px solid var(--line2);
+  border-radius: 15px; box-shadow: 0 8px 26px rgba(0, 0, 0, .3);
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+}
+.gh-box:focus-within {
+  border-color: var(--act);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .3), 0 0 0 3px rgba(255, 176, 32, .1);
+}
+.gh-box textarea {
+  width: 100%; box-sizing: border-box; display: block;
+  background: none; border: 0; outline: none; resize: none;
+  padding: 14px 16px 4px; color: var(--tx); font: inherit;
+  font-size: 14px; line-height: 1.62; min-height: 50px; max-height: 140px;
+}
+.gh-box textarea::placeholder { color: var(--tx3); }
+.gh-bar { display: flex; align-items: center; gap: 6px; padding: 2px 10px 9px 12px; }
+.gh-bar .ion {
+  width: 26px; height: 26px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line2); border-radius: 7px;
+  background: transparent; color: var(--tx2); cursor: pointer;
+  transition: .14s var(--ease);
+}
+.gh-bar .ion:hover { color: var(--act); border-color: var(--act); }
+.gh-bar .sp { flex: 1 1 auto; }
+.gh-bar .send {
+  width: 30px; height: 30px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 50%;
+  background: var(--act); color: var(--onact); cursor: pointer;
+  transition: .14s var(--ease);
+}
+.gh-bar .send svg { transform: rotate(-90deg); }
+.gh-bar .send:disabled { background: var(--card3); color: var(--tx3); cursor: default; }
+.gh-tip {
+  max-width: 780px; margin: 9px auto 0; text-align: center;
+  font-size: 10.5px; color: var(--tx3);
+}
+
+.gh-mask {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(0, 0, 0, .55);
+  display: flex; align-items: center; justify-content: center;
+}
+.gh-modal {
+  width: 380px; max-width: calc(100vw - 40px);
+  background: var(--card2); border: 1px solid var(--line2);
+  border-radius: 14px; padding: 18px; box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+}
+.gh-mt { display: block; font-size: 14px; margin-bottom: 14px; }
+.gh-f { display: block; margin-bottom: 11px; }
+.gh-f span { display: block; font-size: 11.5px; color: var(--tx3); margin-bottom: 5px; }
+.gh-f input {
+  width: 100%; box-sizing: border-box;
+  background: var(--bg); border: 1px solid var(--line2); border-radius: 8px;
+  padding: 8px 10px; color: var(--tx); font: inherit; font-size: 13px; outline: none;
+}
+.gh-f input:focus { border-color: var(--act); }
+.gh-mf { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.gh-mn { margin-top: 10px; font-size: 11px; color: var(--tx3); line-height: 1.6; }
+
+/* 顶栏里的「当前工作区」标：跟页名并排，比页名弱一档 —— 它回答的是「在哪」，
+   页名回答的是「看什么」，一眼能分出主次。 */
+.tws {
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding-right: 8px; margin-right: 2px; border-right: 1px solid var(--line2);
+  color: var(--tx2);
+}
+
+/* 「再开一个」那张虚位卡：跟真卡同尺寸，但一眼看得出不是数据 —— 虚线 + 无背景。 */
+.wscard.add {
+  border-style: dashed; background: transparent; justify-content: center;
+}
+.wscard.add:hover { background: rgba(255, 176, 32, .05); transform: none; }
+.wsc-add { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 0; }
+.wsc-add b { font-size: 13px; font-weight: 600; color: var(--tx2); }
+.wsc-add em { font-style: normal; font-size: 11px; color: var(--tx3); text-align: center; }
