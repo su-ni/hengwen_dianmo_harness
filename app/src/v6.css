@@ -3403,17 +3403,17 @@ select.inp-mn:disabled { opacity: .4; cursor: default; }
   border-right: 1px solid var(--line);
 }
 .rail-icons .lg {
+  /* 工作区左栏顶部的品牌位：只放 logo 本身，**不加任何底色/圆角**。
+     之前这里是「琥珀色圆角方块 + 一个汉字」，换成 SVG 标之后
+     那层底色会变成难看的方框套方框（用户截图指出的就是这个）。 */
   width: 32px;
   height: 32px;
-  border-radius: 9px;
-  background: var(--act);
-  color: #000;
-  font-size: 14px;
-  font-weight: 800;
   display: grid;
   place-items: center;
   margin-bottom: 14px;
   flex: none;
+  background: none;
+  border-radius: 0;
 }
 .rail-icons .railnav {
   display: flex;

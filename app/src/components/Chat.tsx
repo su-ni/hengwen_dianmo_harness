@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { callTool } from '../lib/api'
 import { Icon } from '../components/Icon'
-import { ModelPicker } from '../components/ModelPicker'
-import { EffortPicker } from '../components/EffortPicker'
+import { ModelEffortPicker } from './ModelEffortPicker'
 import { PermPicker } from '../components/PermPicker'
 import { setIntent } from '../lib/intent'
 import {
@@ -12,6 +11,11 @@ import {
   type AsrState,
 } from '../lib/recorder'
 import { md } from '../md'
+import { Logo } from './Logo'
+import { TurnRail, turnsOf } from './TurnRail'
+import { CommandPalette, detectCmd, type CmdItem } from './CommandPalette'
+import { ModePicker } from './ModePicker'
+import { PlanCard as PlanDocCard, type PlanDoc } from './PlanCard'
 
 /* ================= 今日页：一个能聊的助手 =================
 
@@ -111,6 +115,10 @@ type Msg = {
   pending?: Pending | null
   ask?: Ask | null
   card?: Card | null
+  /* 计划模式下产出的方案文档（可多份） */
+  plans?: PlanDoc[] | null
+  /* 这一轮结束后给的下一步建议（4 条，来自 end 帧） */
+  suggest?: string[] | null
   meta?: Meta
   /* 这是第几轮：界面上「从这一轮分叉」要用它当边界（fork 只允许切在 turn 边界） */
   turn?: number
@@ -141,6 +149,8 @@ function normMsgs(rows: any[]): Msg[] {
 const FOCUS_NAME: Record<string, string> = {
   today: '今日', classroom: '课堂', courses: '课程库', schedule: '课表', vocab: '背单词',
   practice: '练习', exam: '考场', stats: '统计', writing: '作文', agent: '设置', canvas: '画布',
+  /* 首屏不是某个业务页：传空串让 <em> 直接不渲染（见下面那处判断）。 */
+  index: '',
 }
 
 /* 空态给几句话当引子。故意分成四类 —— 前三句都不是「填目标」，
@@ -964,8 +974,29 @@ export function Chat({
   page,
   onToggle,
   toggleLabel,
+  fresh,
+  wsKey,
+  hideSessBar,
+  onTool,
+  onRun,
 }: {
   page: string
+  /* 工具轨迹回调：给外层（首屏右栏可视化面板）用。
+     Chat 自己会在消息流里画「思考 / 工具调用」那几行 —— 那是复用，
+     外层要的是同一份数据的**更详细的图形**，所以从这里把轨迹传出去，
+     而不是让调用方自己再解析一遍 SSE。 */
+  onTool?: (c: any) => void
+  onRun?: (name: string, desc?: string) => void
+  /* fresh = 首屏那种「每次都从空会话开始」的形态：
+     不恢复上一次的历史（一进来就是 logo + 标语的空态）。
+     工作区内的会话页不传这个，照旧恢复。 */
+  fresh?: boolean
+  /* 当前工作区 id（由调用方从 base 里取来传进来）。
+     变化时重新读历史 —— 不加这个的话，切了工作区聊天区还停在旧会话。 */
+  wsKey?: string
+  /* 首屏隐藏右上角的「会话」弹层：那一屏的会话归左栏工作区管，
+     顶栏再摆一个「会话 N」只会让人困惑（两套入口指向同一批东西）。 */
+  hideSessBar?: boolean
   /* 今日页右上角那个「看今天的安排」按钮，画在聊天区自己的顶栏里。 */
   onToggle?: () => void
   toggleLabel?: string
@@ -1001,6 +1032,10 @@ export function Chat({
   /* 会话分栏：本机的会话列表 + 当前是哪条 + 面板开没开 */
   const [sess, setSess] = useState<Array<{ id: string; title?: string | null; events?: number }>>([])
   const [curSid, setCurSid] = useState('')
+  /* 统一命令面板（+ / @ / 三合一） */
+  const [cmdOpen, setCmdOpen] = useState(false)
+  const [cmdQ, setCmdQ] = useState('')
+  const [cmdIdx, setCmdIdx] = useState(0)
   const [sessOpen, setSessOpen] = useState(false)
   const [sessQ, setSessQ] = useState('')
   /* 是否贴底。人往上翻去看历史时不再自动拽回底部 —— 那是「正在读」，不是「正在等」。 */
@@ -1136,6 +1171,20 @@ export function Chat({
       meta?: Meta
       turn?: number
     }
+    if (fresh) {
+      /* 首屏：不读历史，直接起一条新会话（空态）。
+         这样「一进来是封面、开始说话才变成会话」这件事是自然的，
+         而不是先闪一下上次聊的内容再被清掉。 */
+      callTool<any>('session_new', {}).then((r) => {
+        if (!alive) return
+        if (r.ok && (r.data as any)?.id) setCurSid((r.data as any).id)
+        setLoaded(true)
+        loadSessions()
+      })
+      return () => { alive = false }
+    }
+    // 工作区换了：先把上一个工作区的消息清掉，别让它在重读期间还挂在界面上
+    if (wsKey) setMsgs([])
     callTool<{ messages: HRow[] }>('agent_history', { limit: 60 }).then((r) => {
       if (!alive) return
       const rows = (r.ok && r.data?.messages) || []
@@ -1145,7 +1194,8 @@ export function Chat({
       loadSessions()
     })
     return () => { alive = false }
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wsKey])
 
   /* 滚到底：直接量那一条滚动容器的 scrollHeight，不用 scrollIntoView ——
      后者会把外层任何能滚的祖先一起带着滚，页面就多出一条滚动条。 */
@@ -1407,6 +1457,7 @@ export function Chat({
               setStep({ ...stepRef.current })
             } else if (kind === 'run') {
               /* 某个慢工具刚开跑：这一刻起它确实在等接口，不是死机。 */
+              if (onRun) onRun(String(o.n || ''), String(o.desc || ''))
               stepRef.current = {
                 n: stepRef.current?.n || 1,
                 total: stepRef.current?.total || 20,
@@ -1440,6 +1491,7 @@ export function Chat({
               } as Trace)
               sealThink(steps)          // 要调工具了，这段思考想完了
               steps.push({ k: 'tool', x: trace[trace.length - 1] })
+              if (onTool) onTool(trace[trace.length - 1])
               patchA({ steps: cloneSteps(steps), trace: trace.slice() })
             } else if (kind === 'end') {
               ended = true
@@ -1458,6 +1510,8 @@ export function Chat({
                    屏幕上却只剩一句「这几个核过的，点一下就入库」—— 按钮一颗都没有。
                    刷新一下反而能看到（那是从记录里恢复的），所以这个 bug 只在当场出现。 */
                 card: (o.card as Card) || null,
+                suggest: Array.isArray(o.suggest) ? (o.suggest as string[]) : null,
+                plans: Array.isArray(o.plans) ? (o.plans as PlanDoc[]) : null,
                 meta: {
                   provider: o.provider as string,
                   model: o.model as string,
@@ -1561,6 +1615,7 @@ export function Chat({
               setStep({ ...stepRef.current })
             }
             else if (kind === 'run') {
+              if (onRun) onRun(String(o.n || ''), String(o.desc || ''))
               stepRef.current = { n: stepRef.current?.n || 1, total: stepRef.current?.total || 20, label: stepRef.current?.label || '', doing: (o.desc as string) || (o.n as string) || '', done: stepRef.current?.done || 0 }
               setStep({ ...stepRef.current })
             }
@@ -1574,6 +1629,7 @@ export function Chat({
               trace.push({ tool: (o.n as string) || '', args: (o.args as Record<string, unknown>) || {}, ms: (o.ms as number) || 0, ok: !!o.ok, summary: (o.summary as string) || undefined, ui: (o.ui as Trace['ui']) || null, error: (o.error as string) || undefined } as Trace)
               sealThink(steps)
               steps.push({ k: 'tool', x: trace[trace.length - 1] })
+              if (onTool) onTool(trace[trace.length - 1])
               patchA({ steps: cloneSteps(steps), trace: trace.slice() })
             } else if (kind === 'end') {
               ended = true
@@ -1710,7 +1766,117 @@ export function Chat({
     loadSessions()
   }
 
+  /* 外部（左栏「新会话」按钮）通过 window 事件触发这里的开新会话。
+     为什么不重挂载：重挂载会让它经历 empty→非空 的一次跳变，
+     输入框从中间「先往上、再往下」抽搐一下。所以只切会话，不重建组件。 */
+  useEffect(() => {
+    /* 只清视图、**不新建**：会话由调用方（左栏「新会话」）建好并切好指针。
+       这里再调 newSession() 的话，一次点击会冒出两条会话（这条 bug 出现过）。 */
+    const h = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail || {}
+      const sid = String(detail.sid || '')
+      setMsgs([])
+      setErr('')
+      setEditIdx(null)
+      if (sid) setCurSid(sid)
+      loadSessions()
+    }
+    window.addEventListener('sd:new-session', h as EventListener)
+    return () => window.removeEventListener('sd:new-session', h as EventListener)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /* 还等着人回答的提问：最后一条带 ask 的消息。
+     为什么要提到输入框上方：提问卡摆在消息流里，人滚上去才看得见，
+     而它其实是在**等你现在就答**——挡住输入框才符合它的紧急程度。 */
+  const pendingAskIdx = (() => {
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i]
+      if (m.role !== 'assistant') continue
+      if (m.ask) return i
+      if (m.text || m.card) return -1   // 它已经往下说了，旧的提问作废
+    }
+    return -1
+  })()
+  const pendingAsk = pendingAskIdx >= 0 ? msgs[pendingAskIdx].ask : null
+
   const empty = loaded && msgs.length === 0
+
+  /* 命令面板条目：添加 / 指令两组。
+     每一项都真干事 —— 不是占位文字。 */
+  const cmds: CmdItem[] = useMemo(() => [
+    {
+      k: 'file', cn: '文件', en: 'file', hint: '任意格式，可多选', group: '添加', icon: 'file',
+      run: () => { const i = document.createElement('input'); i.type = 'file'; i.multiple = true; i.click() },
+    },
+    {
+      k: 'dir', cn: '文件夹', en: 'dir', hint: '整个目录收进来', group: '添加', icon: 'dir',
+      run: () => {
+        const i = document.createElement('input') as any
+        i.type = 'file'; i.webkitdirectory = true; i.multiple = true; i.click()
+      },
+    },
+    {
+      k: 'shots', cn: '截图库', en: 'shots', hint: '课堂截帧 / 画布导出', group: '添加', icon: 'shots',
+      run: () => { location.hash = 'shots' },
+    },
+    {
+      k: 'compress', cn: '压缩', en: 'compact', hint: '压缩以上对话内容', group: '指令', icon: 'compress',
+      run: () => { setCmdOpen(false); callTool('agent_compact', {}, { write: true }).catch(() => {}) },
+    },
+    {
+      k: 'model', cn: '模型', en: 'model', hint: '选择本次会话使用的模型', group: '指令', icon: 'model',
+      run: () => { setCmdOpen(false) },
+    },
+    {
+      k: 'export', cn: '导出', en: 'export', hint: '将当前会话导出为文件', group: '指令', icon: 'export',
+      run: () => {
+        const body = msgs.map((m) => '## '
+          + (m.role === 'user' ? '我' : '助手')
+          + '\n\n' + (m.text || '')).join('\n\n')
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(new Blob([body], { type: 'text/markdown' }))
+        a.download = 'session-' + Date.now() + '.md'
+        a.click()
+      },
+    },
+    {
+      k: 'plan', cn: '计划', en: 'plan', hint: '按考试日期拆到每天', group: '指令', icon: 'plan',
+      run: () => { setCmdOpen(false); setText('帮我按考试日期排一个学习计划') },
+    },
+  ] as CmdItem[], [msgs])
+
+  /* 轮次导航：把消息序列切成「轮」（每条 user 消息开一轮）。
+     turnNo[i] 给 user 气泡挂 data-turn 锚点，轨道点击才能滚到它。
+     activeTurn = 视口里正在显示的那一轮（滚动时更新，用于高亮）。 */
+  const turnNo = useMemo(() => {
+    const map: Record<number, number> = {}
+    let n = 0
+    msgs.forEach((m, i) => {
+      if (m.role === 'user') { n += 1; map[i] = n }
+    })
+    return map
+  }, [msgs])
+  const turns = useMemo(() => turnsOf(msgs as any), [msgs])
+
+  const [activeTurn, setActiveTurn] = useState<number | null>(null)
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el || !turns.length) { setActiveTurn(null); return }
+    const mark = () => {
+      const box = el.getBoundingClientRect()
+      const mid = box.top + box.height / 2
+      let cur: number | null = null
+      el.querySelectorAll('[data-turn]').forEach((node) => {
+        const r = (node as HTMLElement).getBoundingClientRect()
+        if (r.top <= mid) cur = Number((node as HTMLElement).dataset.turn) || cur
+      })
+      setActiveTurn(cur)
+    }
+    mark()
+    el.addEventListener('scroll', mark, { passive: true })
+    return () => el.removeEventListener('scroll', mark)
+  }, [turns.length])
 
   /* 底部状态条读最后一条带 meta 的助手消息 —— 刷新回来也照样有（meta 跟着记录存）。 */
   const lastStat = useMemo(() => {
@@ -1728,11 +1894,12 @@ export function Chat({
         <span className="chat-who">
           <span className="live" />
           研学台助手
-          <em>{FOCUS_NAME[page] || page}</em>
+          {FOCUS_NAME[page] ? <em>{FOCUS_NAME[page]}</em> : null}
         </span>
         <div className="sp" />
-        {/* 会话分栏：几条会话分开存，点一下切过去，不用把旧的清掉 */}
-        <div className="sess-wrap">
+        {/* 会话分栏：几条会话分开存，点一下切过去，不用把旧的清掉。
+            fresh（首屏）不显示 —— 那一屏每次都是新会话，摆个「会话 N」只会让人困惑。 */}
+        {(!fresh && !hideSessBar) ? <div className="sess-wrap">
           <button className="btn sm" onClick={() => { setSessOpen(!sessOpen); loadSessions() }}>
             会话 {sess.length || ''}
           </button>
@@ -1768,25 +1935,35 @@ export function Chat({
               </div>
             </div>
           )}
-        </div>
+        </div> : null}
         {onToggle && (
           <button className="btn sm" onClick={onToggle}>{toggleLabel || '换一种看法'}</button>
         )}
       </div>
 
       <div className="chat-body" ref={bodyRef} onScroll={onBodyScroll}>
+        {/* 轮次导航轨：贴在右缘的竖排刻度，每根 = 一轮，点击跳过去。
+            只在有内容时出现（空白态没有轮次可跳）。 */}
+        {!empty ? (
+          <TurnRail turns={turns} activeN={activeTurn} onJump={() => { /* 滚动由轨道自己做 */ }} />
+        ) : null}
         {empty ? (
           <div className="cgreet">
-            <h1>想学什么、想问什么，直接说</h1>
-            <p>
-              它不是表单，也不会一进门就问你「考什么」。<br />
-              你说目标它就去找课排计划；你只是随口问，它就只回话。
-            </p>
+            {/* 空态就是首屏的「封面」：标 + 标语。
+                一旦有了消息这个块整段不再渲染（empty 变 false），
+                所以「开始会话后标消失、输入框下移」是天然的，不需要额外动画。 */}
+            <div className="cg-brand">
+              <Logo size={54} tone="white" />
+              <b>衡文点墨</b>
+              <span className="cg-tag">HARNESS</span>
+            </div>
+            <p className="cg-slogan">书山有路勤为径</p>
           </div>
         ) : (
           <div className="cflow">
             {msgs.map((m, i) => m.role === 'user' ? (
-              <div className={'cmsg user' + (editIdx === i ? ' editing' : '')} key={i}>
+              <div className={'cmsg user' + (editIdx === i ? ' editing' : '')} key={i}
+                data-turn={turnNo[i] || undefined}>
                 <div className="uacts">
                   <button className="ubtn" onClick={() => editFrom(i)} title="把这句话填回输入框改">改</button>
                 </div>
@@ -1819,21 +1996,54 @@ export function Chat({
                   </div>
                 ) : null}
                 {m.card ? <ActionCard c={m.card} /> : null}
-                {m.ask ? (
-                  <AskBox
-                    a={m.ask}
-                    /* 只有「它正等着你回答」时才锁：就是最后一条、且它没在跑。
-                       之前的写法是 i < msgs.length - 1 || busy —— 流一结束 busy 还是 true 的那一帧，
-                       整张卡就被画成已发送；更糟的是刷新回来时只要有半截空消息在后面，
-                       最后一张卡也会被误判成过期。所以直接认 m.ask 本身：答完就清掉，清了才锁。 */
-                    locked={askLocked(i)}
-                    /* 发出去就当场清掉这一条卡：不然刷新回来，服务器上那行还带着 ask，
-                       一张已经答过的卡会重新长出来。 */
-                    onSend={(t) => {
-                      setMsgs((n) => { const c = n.slice(); c[i] = { ...c[i], ask: null }; return c })
-                      send(t)
-                    }}
-                  />
+                {/* 计划模式下产出的方案：等人点「按这个来」 */}
+                {m.plans && m.plans.length ? (
+                  <div className="planlist">
+                    {m.plans.map((d) => (
+                      <PlanDocCard
+                        key={d.id}
+                        doc={d}
+                        onDecide={(id: string, st: string) => {
+                          setMsgs((n) => {
+                            const c = n.slice()
+                            c[i] = {
+                              ...c[i],
+                              plans: (c[i].plans || []).map((x) =>
+                                x.id === id ? { ...x, status: st } : x),
+                            }
+                            return c
+                          })
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                {/* 下一步建议：像豆包那样在回答下面给四条，点一下填进输入框 */}
+                {m.suggest && m.suggest.length ? (
+                  <div className="csug">
+                    {m.suggest.slice(0, 4).map((t, k) => (
+                      <button
+                        key={k}
+                        className="csug-i"
+                        onClick={() => {
+                          setText(t)
+                          taRef?.current?.focus()
+                        }}
+                        title="点一下填进输入框"
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {/* 提问卡**不再摆在消息流里**：它是在等你现在就答，
+                    所以提到输入框上方（见下面 chat-dock）。
+                    这里只在「已经答完」时留一行痕迹，方便回看当时问了什么。 */}
+                {m.ask && i !== pendingAskIdx ? (
+                  <div className="cask-done">
+                    <Icon n="check" size={11} />
+                    <span>已答：{m.ask.question || '（提问）'}</span>
+                  </div>
                 ) : null}
                 {m.pending && (
                   <div className="cbub warn">
@@ -1902,6 +2112,25 @@ export function Chat({
 
       <div className="chat-dock">
         <div className="dock-in">
+          {/* 待回答的提问：贴在输入框正上方，挡住输入框也在所不惜 ——
+              它就是在等你这一句话。多选、单选、自己写都由 AskBox 处理。 */}
+          {pendingAsk ? (
+            <div className="cask-dock">
+              <AskBox
+                a={pendingAsk}
+                locked={false}
+                onSend={(t) => {
+                  const idx = pendingAskIdx
+                  setMsgs((n) => {
+                    const c = n.slice()
+                    c[idx] = { ...c[idx], ask: null }
+                    return c
+                  })
+                  send(t)
+                }}
+              />
+            </div>
+          ) : null}
           {/* 麦克风出问题就在这儿说清楚：被拒、被占用、没设备，三种原因给三种说法。
               点一下关掉，不自己消失 —— 一句话没听清就飘走的提示等于没说。 */}
           {asr.error ? (
@@ -1910,6 +2139,18 @@ export function Chat({
               <Icon n="x" size={11} />
             </button>
           ) : null}
+          {/* 统一命令面板：贴在输入框上方（+ / @ / 三种触发共用一个面板） */}
+          <CommandPalette
+            open={cmdOpen}
+            query={cmdQ.startsWith('@') ? cmdQ.slice(1) : cmdQ}
+            items={cmds}
+            active={cmdIdx}
+            setActive={setCmdIdx}
+            onClose={() => { setCmdOpen(false); setCmdQ('') }}
+            onPick={(it) => { setCmdOpen(false); setCmdQ(''); it.run() }}
+            anchor={{ left: 0, bottom: 0 }}
+            above
+          />
           <div
             className={'cbox' + (busy ? ' busy' : '') + (dropOn ? ' dropping' : '')}
             onDragOver={(e) => { e.preventDefault(); if (!dropOn) setDropOn(true) }}
@@ -1964,13 +2205,28 @@ export function Chat({
               }}
             />
             <div className="cbar">
-              <ModelPicker />
-              <EffortPicker disabled={busy} />
+              {/* 统一控件排布（与首屏一致）：
+                  + 面板 | @ 面板 | 权限 | 弹性 | 模型与推理等级 | 麦克风 | 发送 */}
+              <button
+                className="dm-ion"
+                title="添加 / 指令"
+                onClick={() => setCmdOpen((v) => !v)}
+                disabled={busy}
+              >
+                <Icon n="plus" size={15} />
+              </button>
+              <button
+                className="dm-ion"
+                title="引用"
+                onClick={() => { setCmdQ(''); setCmdOpen(true) }}
+                disabled={busy}
+              >
+                <b className="dm-at">@</b>
+              </button>
+              <ModePicker disabled={busy} />
               <PermPicker disabled={busy} />
               <div className="sp" />
-              {msgs.length > 0 && (
-                <button className="clr" onClick={clearAll} title="把这段对话清掉">清空</button>
-              )}
+              <ModelEffortPicker disabled={busy} />
               {/* 麦克风挨着清空、在它右边。录音时按钮自己变色，旁边跟一颗真实的秒数；
                   再点一次就是停 —— 除此之外没有任何东西能让它停。 */}
               <button
@@ -2011,7 +2267,7 @@ export function Chat({
             </div>
           </div>
 
-          {empty ? (
+          {empty && !fresh ? (
             <div className="chips">
               {TRY.map((x) => (
                 <button className="chip" key={x.t} onClick={() => send(x.s)}>

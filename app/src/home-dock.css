@@ -1,0 +1,132 @@
+/* ===== 首屏输入区（dm-box）=====
+ * 这套样式是首屏专用的：会话页用的是 .cbox，两者职责不同 ——
+ * 首屏是「封面」，框更宽、更安静；会话页是「工作区」，框在底部、带状态栏。
+ *
+ * 之前我误把首屏换成 <Chat>（用 .cbox），于是这一整套样式在页面上消失了。
+ * 现在恢复：结构见 Home.tsx 的 .dm-dock > .dock-in > .dm-box。
+ */
+
+.dm-dock { flex: none; padding: 0 24px 26px; }
+.dm-dock .dock-in { width: 100%; max-width: 820px; margin: 0 auto; }
+
+.dm-box {
+  position: relative;
+  background: var(--card2);
+  border: 1px solid var(--line2);
+  border-radius: 16px;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .3);
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+}
+.dm-box:focus-within {
+  border-color: var(--act);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .3), 0 0 0 3px rgba(255, 176, 32, .1);
+}
+
+.dm-box textarea {
+  width: 100%; box-sizing: border-box; display: block;
+  background: none; border: 0; outline: none; resize: none;
+  padding: 15px 17px 4px; color: var(--tx); font: inherit;
+  font-size: 14px; line-height: 1.65;
+  min-height: 54px; max-height: 132px; overflow-y: auto;
+}
+.dm-box textarea::placeholder { color: var(--tx3); }
+
+/* 底部工具行：+ | @ | 权限 | 弹性 | 模型与推理 | 麦克风 | 发送 */
+.dm-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 11px 10px 13px;
+}
+.dm-bar .sp { flex: 1 1 auto; min-width: 0; }
+
+.dm-ion {
+  width: 28px; height: 28px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line2); border-radius: 8px;
+  background: transparent; color: var(--tx2); cursor: pointer;
+  transition: .14s var(--ease);
+}
+.dm-ion:hover:not(:disabled) { color: var(--act); border-color: var(--act); }
+.dm-ion:disabled { opacity: .45; cursor: default; }
+.dm-at { font-size: 14px; font-weight: 600; line-height: 1; }
+
+/* 首屏的消息流：开始时挂在中间区，说话后这块撑开、输入框吸底 */
+.dm-flow {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  max-width: 820px; width: 100%; margin: 0 auto;
+  /* 右边多留 34px：轮次刻度轨固定在那条空位上，不压正文 */
+  padding: 26px 34px 10px 24px;
+  display: flex; flex-direction: column; gap: 14px;
+  /* 完全隐藏滚动条：内容照常能滚（滚轮 / 触摸 / 拖选），但不画那根条。
+     scrollbar-width:none 是 Firefox/新版 Chromium，
+     ::-webkit-scrollbar{display:none} 兜旧 WebKit —— 两条都要写。 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.dm-flow::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.dm-msg { display: flex; }
+.dm-msg.user { justify-content: flex-end; }
+.dm-bub {
+  max-width: 76%; padding: 11px 15px;
+  background: var(--act); color: var(--onact);
+  border-radius: 14px 14px 4px 14px;
+  font-size: 13.5px; line-height: 1.65;
+  white-space: pre-wrap; word-break: break-word;
+}
+.dm-say {
+  max-width: 100%; padding: 2px 2px 0;
+  color: var(--tx); font-size: 13.5px; line-height: 1.75;
+}
+.dm-say pre {
+  margin: 0; white-space: pre-wrap; word-break: break-word;
+  font: inherit;
+}
+.dm-typing { display: flex; gap: 5px; padding: 6px 2px; }
+.dm-typing i {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--tx3); animation: dmBlink 1.1s infinite ease-in-out;
+}
+.dm-typing i:nth-child(2) { animation-delay: .16s; }
+.dm-typing i:nth-child(3) { animation-delay: .32s; }
+@keyframes dmBlink {
+  0%, 80%, 100% { opacity: .25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
+}
+
+/* 开始说话后：中间区不再居中，改成消息流占满，输入框吸底 */
+.dmain.started { justify-content: flex-start; }
+.dmain.started .dm-dock { padding-bottom: 18px; }
+
+/* 首屏错误条 */
+.dm-err {
+  width: 100%; max-width: 820px; margin: 8px auto 0;
+  padding: 9px 12px; box-sizing: border-box;
+  border: 1px solid rgba(221, 85, 85, .45); border-radius: 9px;
+  color: var(--bad, #d55); font-size: 12.5px;
+}
+
+/* 首屏状态条：与会话页同一个组件（UsageBar），这里只负责摆位置 */
+.dm-stat {
+  max-width: 820px; margin: 8px auto 0;
+  display: flex; justify-content: center;
+}
+
+
+/* 左栏与弹层里的列表：同样隐藏滚动条，只保留滚动能力。
+   这两处在会话/工作区多的时候一定会溢出，露出一根灰条很脏。 */
+.dr-list,
+.dr-sess,
+.me-sub-list,
+.cp-pop,
+.sm-list {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.dr-list::-webkit-scrollbar,
+.dr-sess::-webkit-scrollbar,
+.me-sub-list::-webkit-scrollbar,
+.cp-pop::-webkit-scrollbar,
+.sm-list::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}

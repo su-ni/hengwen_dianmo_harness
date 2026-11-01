@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { loadBase, type Base } from './lib/api'
+import { revealTransition } from './lib/reveal'
 import { Shell, type PageKey } from './components/Shell'
 import { SearchModal } from './components/SearchModal'
 import { CourseHome } from './pages/CourseHome'
@@ -30,6 +31,7 @@ const LazySearch = lazy(() => import('./pages/Search').then((m) => ({ default: m
 /* 全局首屏（工作区列表 + 一个能聊的框）。它是两级结构的第一级：
    index → 点工作区 → 进 home（原课程主页）及以下各页。 */
 const LazyIndex = lazy(() => import('./pages/Home').then((m) => ({ default: m.Home })))
+const LazySkills = lazy(() => import('./pages/Skills').then((m) => ({ default: m.Skills })))
 
 const KEY = 'sd_page'
 const SID_KEY = 'sd_sid'
@@ -37,6 +39,7 @@ const SID_KEY = 'sd_sid'
    名单里没有的页会被当场弹回去（新增页面忘了加，表现就是「点了没反应」）。
    加 PageKey 的时候必须同步这里。 */
 const PAGES: PageKey[] = ['index', 'home', 'today', 'classroom', 'courses', 'schedule', 'vocab',
+  'skills',
   'practice', 'notes', 'notesAll', 'exam', 'stats', 'writing', 'agent', 'canvas', 'shots',
   'search']
 
@@ -238,7 +241,12 @@ export function App() {
       setBase(d)
       const subs: any[] = (d as any)?.subjects ?? []
       if (subs.length && !subs.some((s) => s.id === sid)) setSid(subs[0].id)
-      setPage('home')
+      /* 切页走圆形扩散：从右下角漾开盖住旧界面，再露出工作区。
+         数据先到位再切，避免中途闪一帧空态。 */
+      /* 进工作区第一眼是**对话**（用户明确要求）：
+         不再是课程主页那堆卡片 —— 卡片是进去之后从对话里点出来的。
+         today 页内部渲染的就是 <Chat>，所以直接落到线程。 */
+      revealTransition(() => setPage('today'))
     } catch (e: any) {
       setBootErr(String(e?.message || e))
     }
@@ -308,7 +316,7 @@ export function App() {
       </Suspense>
     ) : (
     <Shell page={page} onGo={go} base={base} sid={sid} onSid={(id) => { setSid(id); setPage('home') }}
-      onHome={() => setPage('index')}
+      onHome={() => revealTransition(() => setPage('index'))}
       wsName={((base as any)?.ws || {}).name}
       topRight={page === 'canvas' ? canvasTop : undefined}
       searchQ={searchQ}
@@ -327,6 +335,7 @@ export function App() {
             形状统一用 V6 的 Skel（kpi 那款：几块数字格），它已经是全站「在读」的语言；
             这里不新造花哨骨架，也不写新的 CSS。 */}
         <Suspense fallback={<ChunkGate fill={page === 'vocab' || page === 'today' || page === 'canvas'} />}>
+          {page === 'skills' && <LazySkills onGo={go} />}
           {page === 'home' && <CourseHome base={base} sid={sid} onGo={go} />}
           {page === 'today' && <LazyToday base={base} go={go} />}
           {page === 'classroom' && <LazyClassroom base={base} goCanvas={goCanvas} initSid={sid} />}

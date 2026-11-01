@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Icon, type IconName } from './Icon'
+import { Logo } from './Logo'
 import { clsColor } from './V6'
 import { Sel } from './Sel'
 import { type Base } from '../lib/api'
@@ -8,7 +9,7 @@ import { useTool } from '../lib/useTool'
 export type PageKey =
   | 'index' | 'home' | 'today' | 'classroom' | 'courses' | 'schedule' | 'vocab'
   | 'practice' | 'notes' | 'notesAll' | 'exam' | 'stats' | 'writing' | 'agent' | 'canvas' | 'shots'
-  | 'search'
+  | 'search' | 'skills'
 
 export type NavItem = { k: PageKey; t: string; n: IconName; cnt?: (b: Base) => number }
 
@@ -36,6 +37,7 @@ const ICON_NAV_TAIL: { k: PageKey; t: string; n: IconName }[] = [
   /* 截图库：课堂上按 S 存下来的帧、画布导出的图、上传的图，全在这儿翻。
      以前只有课堂右栏（本讲 24 张）和画布抽屉能看到 —— 截了 200 张没处找。 */
   { k: 'shots', t: '截图库', n: 'img' },
+  { k: 'skills', t: '技能中心', n: 'stack' },
   { k: 'agent', t: '设置', n: 'agent' },
 ]
 
@@ -77,6 +79,7 @@ export const TITLES: Record<PageKey, { kick: string; h1: string; sub: string }> 
   canvas: { kick: '画布', h1: '笔记画布', sub: '导图存在本机，可拉 XMind / Obsidian 等来源' },
   shots: { kick: '截图库', h1: '截过的每一帧', sub: '课堂按 S 存的帧、画布导出的图、上传的图 —— 按科目和关键词找得到' },
   search: { kick: '搜索', h1: '全局搜索', sub: '页面 / 能力 / 题考点词 / 语义 / 本机文件 / AI 会话 —— 一路并排' },
+  skills: { kick: '本机', h1: '技能', sub: '教模型怎么做的说明' },
   index: { kick: '工作区', h1: '工作区', sub: '' },
 }
 
@@ -181,8 +184,11 @@ export function Shell({
   return (
     <div className="app app-mn app-icons">
       <aside className="rail rail-icons">
-        <div className="lg" title="研学台 StudyDeck" onClick={() => onHome && onHome()}
-          style={onHome ? { cursor: 'pointer' } : undefined}>研</div>
+        <div className="lg" title="回工作区列表" onClick={() => onHome && onHome()}
+          style={{ cursor: onHome ? 'pointer' : 'default', display: 'flex',
+                   alignItems: 'center', justifyContent: 'center' }}>
+          <Logo size={26} tone="white" />
+        </div>
         <nav className="railnav">
           {ICON_NAV.map((it) => (
             <button key={it.k} className={'rb' + (page === it.k ? ' on' : '')}

@@ -113,10 +113,26 @@ export function CourseHome({ base, sid, onGo }: {
       <section className="chome chome-wel">
         <header className="chome-head">
           <div className="chome-headmain">
-            <div className="kick">从这里开始</div>
-            <h1>还没有课程</h1>
+            <div className="kick">这个工作区</div>
+            <h1>还没有挂科目</h1>
             <div className="facts">
-              <div className="d">这门工具不预装任何课 —— 课从你自己的进度来</div>
+              <div className="d">
+                工作区是分开的：科目、课、题、词、会话都只属于某一个工作区。
+                这里一个科目都没有 —— 挂上才有内容可看。
+              </div>
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <button className="btn sm act" onClick={async () => {
+                /* 把本机现有的科目全挂到当前工作区（最省事的起步方式；
+                   也可以之后在工作区设置里逐个挑）。 */
+                const wid = ((base as any)?.ws || {}).id
+                if (!wid) return
+                const r = await callTool<any>('ws_set_subjects', { wid, subjects: [] })
+                if (!r.ok) return
+                location.reload()
+              }}>
+                挂上本机全部科目
+              </button>
             </div>
           </div>
         </header>

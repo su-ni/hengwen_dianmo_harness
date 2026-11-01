@@ -56,6 +56,9 @@
   --ease: cubic-bezier(.22, .61, .36, 1);
   --f: "Inter", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
   --mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+  /* 品牌字：衬线。宋/思源宋体自带笔锋，跟「书山」这套意象是一路的；
+     正文仍用 --f 无衬线 —— 长段落要的是耐看，不是气势。 */
+  --fb: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun", serif;
 }
 
 /* 画布保持深色专业风（用户决策：不跟随主界面变浅）—— 画布内部一律读这套变量，
@@ -155,4 +158,23 @@ a { color: inherit; text-decoration: none; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* ================= 全站隐藏滚动条（保留滚动能力）=================
+ *
+ * 用户要求（2026-10-31）：不要出现滚动条。
+ * 这里一次性覆盖所有容器 —— 而不是每遇到一处再补一条，
+ * 否则总会有漏网的地方（之前就只改了对话区，左栏和弹层还露着）。
+ *
+ * 注意：这是**隐藏**不是禁用。滚轮、触摸、键盘、拖拽全都照常工作，
+ * 只是不画那根灰条。真需要「看到进度」的地方用别的表达（刻度轨、渐隐）。
+ */
+* {
+  scrollbar-width: none;          /* Firefox / 新版 Chromium */
+  -ms-overflow-style: none;       /* 旧 Edge */
+}
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }

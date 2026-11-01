@@ -263,8 +263,27 @@ def update(con, wid, **kw):
     return one(con, wid)
 
 
-def delete(con, wid, drop_files=False):
-    """删工作区。默认只删登记，不删磁盘目录（误删不可逆，留下能找回）。"""
+def delete(con, wid, drop_files=False, purge=False):
+    """删工作区。
+
+    drop_files：是否删磁盘目录（默认不删，误删不可逆）
+    purge：是否**连同业务数据一起删**（会话/作答/笔记/画布/截图/进度/事件）。
+           默认 False = 只删登记，数据留着但会变成「未归属」，
+           界面上能找回来。True 才会真删。
+    """
+    if purge:
+        for t in ("sessions", "answers", "word_mem", "notes", "canvas_maps",
+                  "shots", "lesson_progress", "events"):
+            try:
+                con.execute("DELETE FROM %s WHERE workspace_id=?" % t, (wid,))
+            except Exception:
+                pass          # 老库可能没有这一列，跳过不阻断删除
+        try:
+            con.execute("DELETE FROM session_events WHERE session_id NOT IN"
+                        " (SELECT id FROM sessions)")
+        except Exception:
+            pass
+
     con.execute("DELETE FROM workspace_subs WHERE workspace_id=?", (wid,))
     con.execute("DELETE FROM modules WHERE workspace_id=?", (wid,))
     con.execute("DELETE FROM plan_docs WHERE workspace_id=?", (wid,))

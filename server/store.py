@@ -374,6 +374,50 @@ def ensure_sync_columns(con):
         except sqlite3.Error:
             pass
 
+    # 工作区隔离：7 张业务表补 workspace_id（见 _ensure_workspace_columns）
+    _ensure_workspace_columns(con)
+
+
+def _ensure_workspace_columns(con):
+    """给业务表补 workspace_id —— 工作区隔离的地基。
+
+    为什么必须加：以前只有 sessions 有这一列，作答/背词/笔记/画布/截图/
+    讲次进度/学习事件全部跨工作区共享。表现就是「新建一个空工作区，
+    里面还有 14 讲、3790 词、16 套卷、32 条作答」。
+
+    历史数据（workspace_id IS NULL）不回填：它们本来就不属于任何工作区，
+    硬塞进某个工作区会把「这批数据是谁的」这件事永久搞乱。界面上单独
+    提示并提供显式「归到当前工作区」按钮。
+    """
+    for t in ("answers", "word_mem", "notes", "canvas_maps",
+              "shots", "lesson_progress", "events"):
+        cols = {r["name"] for r in
+                con.execute("PRAGMA table_info(%s)" % t).fetchall()}
+        if not cols:          # 新库：表还没建，等 executescript
+            continue
+        if "workspace_id" not in cols:
+            try:
+                con.execute("ALTER TABLE %s ADD COLUMN workspace_id TEXT" % t)
+            except sqlite3.Error:
+                pass
+        try:
+            con.execute("CREATE INDEX IF NOT EXISTS ix_%s_ws ON %s(workspace_id)"
+                        % (t, t))
+        except sqlite3.Error:
+            pass
+
+
+def ws_now():
+    """当前工作区 id；没有就 None。
+
+    所有写入都走它，读的时候按同一个值过滤 —— 同一个口径，避免
+    「写进去是这个工作区、查出来按另一个」这种要查半天的错。
+    """
+    try:
+        return kv_get("ws.current") or None
+    except Exception:
+        return None
+
 
 def _backfill_answer_source(con):
     """老库回填：以前 answers 里只有英语语法题库的作答，统一认成 grammar780。
@@ -426,27 +470,33 @@ def add_event(kind, subject=None, lesson_id=None, word=None, part=None,
     con = connect()
     try:
         con.execute(
-            "INSERT INTO events(ts,kind,subject,lesson_id,word,part,qno,ok,seconds,payload,uid)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO events(ts,kind,subject,lesson_id,word,part,qno,ok,"
+            "seconds,payload,uid,workspace_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             (ts or now(), kind, subject, lesson_id, word, part, qno,
              None if ok is None else int(bool(ok)), float(seconds or 0),
-             None if payload is None else str(payload), uid or new_uid()))
+             None if payload is None else str(payload), uid or new_uid(),
+             ws_now()))
         con.commit()
     finally:
         con.close()
 
 
-def recent_events(limit=20):
+def recent_events(limit=20, workspace_id=None):
     con = connect()
     try:
-        rows = con.execute(
-            "SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        if workspace_id:
+            rows = con.execute(
+                "SELECT * FROM events WHERE workspace_id=? ORDER BY id DESC LIMIT ?",
+                (workspace_id, limit)).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
     finally:
         con.close()
 
 
-def events_today(kinds=None):
+def events_today(kinds=None, workspace_id=None):
     con = connect()
     try:
         sql = "SELECT * FROM events WHERE substr(ts,1,10)=?"
@@ -454,6 +504,9 @@ def events_today(kinds=None):
         if kinds:
             sql += " AND kind IN (%s)" % ",".join("?" * len(kinds))
             args += list(kinds)
+        if workspace_id:
+            sql += " AND workspace_id=?"
+            args.append(workspace_id)
         return [dict(r) for r in con.execute(sql, args).fetchall()]
     finally:
         con.close()
@@ -470,14 +523,19 @@ def counts_by_part(kind):
         con.close()
 
 
-def exam_state_all():
-    """{paper_id: {题号: 1 对 / 0 错}}，来自本机真实作答。"""
+def exam_state_all(workspace_id=None):
+    """{paper_id: {题号: 1 对 / 0 错}}，来自本机真实作答。
+
+    workspace_id 给了就只算这个工作区的作答。
+    """
     out = {}
     con = connect()
     try:
+        ws_sql = " AND workspace_id=?" if workspace_id else ""
         rows = con.execute(
             "SELECT part, qno, ok FROM events WHERE kind='exam_answer'"
-            " AND part IS NOT NULL AND qno IS NOT NULL").fetchall()
+            " AND part IS NOT NULL AND qno IS NOT NULL" + ws_sql,
+            ((workspace_id,) if workspace_id else ())).fetchall()
     finally:
         con.close()
     for r in rows:
@@ -485,26 +543,33 @@ def exam_state_all():
     return out
 
 
-def learning_seconds():
+def learning_seconds(workspace_id=None):
     """真实投入时长（秒）：只汇总事件里真的带了秒数的那些。
 
-    play       = 看视频的真实秒数（前端每 10 秒上报一次实看时长）
-    exam_tick  = 考场计时的真实秒数
-    没有秒数的事件（切页、翻卡、判分）不算进时长——那是动作数，不是时间。
+    play       = 看视频的真实秒数（前端每 10 秒上报一次实际时间）
+    exam_tick  = 做题计时器的真实秒数
+    没有这两类事件的话页面上就是零，不用别的数据凑 —— 那会把「坐在电脑前」
+    的时间也算成学习时间。
+
+    workspace_id：给了就只算这个工作区的。
     """
     con = connect()
     try:
+        ws_sql = " AND workspace_id=?" if workspace_id else ""
+        ws_args = [workspace_id] if workspace_id else []
         r = con.execute(
             "SELECT SUM(seconds) s FROM events WHERE kind IN ('play','exam_tick')"
-        ).fetchone()
+            + ws_sql, tuple(ws_args)).fetchone()
         t = con.execute(
             "SELECT SUM(seconds) s FROM events WHERE kind IN ('play','exam_tick')"
-            " AND substr(ts,1,10)=?", (today(),)).fetchone()
+            " AND substr(ts,1,10)=?" + ws_sql,
+            tuple([today()] + ws_args)).fetchone()
         by_kind = {x["kind"]: (x["s"] or 0) for x in con.execute(
             "SELECT kind, SUM(seconds) s FROM events WHERE kind IN ('play','exam_tick')"
-            " GROUP BY kind").fetchall()}
-        return {"total": round(r["s"] or 0, 1), "today": round(t["s"] or 0, 1),
-                "by_kind": {k: round(v, 1) for k, v in by_kind.items()}}
+            + ws_sql + " GROUP BY kind", tuple(ws_args)).fetchall()
+        }
+        return {"total": int(r["s"] or 0), "today": int(t["s"] or 0),
+                "by_kind": by_kind}
     finally:
         con.close()
 
@@ -535,13 +600,15 @@ def lesson_play_rows(limit=8):
         con.close()
 
 
-def last_7d_minutes():
+def last_7d_minutes(workspace_id=None):
     """最近 7 天每天的学习分钟（按 events.seconds 汇总，真实值，没记就是 0）。"""
     con = connect()
     try:
+        ws_sql = " WHERE workspace_id=?" if workspace_id else ""
         rows = con.execute(
-            "SELECT substr(ts,1,10) d, SUM(seconds) s FROM events"
-            " GROUP BY d ORDER BY d DESC LIMIT 7").fetchall()
+            "SELECT substr(ts,1,10) d, SUM(seconds) s FROM events" + ws_sql +
+            " GROUP BY d ORDER BY d DESC LIMIT 7",
+            ((workspace_id,) if workspace_id else ())).fetchall()
         return {r["d"]: round((r["s"] or 0) / 60.0, 1) for r in rows}
     finally:
         con.close()
@@ -619,10 +686,11 @@ def grade_word(word, ok, fuzzy=False):
             days = config.SM2_INTERVALS[min(box, len(config.SM2_INTERVALS) - 1)]
             due = (dt.date.today() + dt.timedelta(days=days)).isoformat()
         con.execute(
-            "INSERT INTO word_mem(word,box,due,seen,right,wrong,last_ts)"
-            " VALUES(?,?,?,?,?,?,?)"
-            " ON CONFLICT(word) DO UPDATE SET box=?,due=?,seen=?,right=?,wrong=?,last_ts=?",
-            (word, box, due, seen, right, wrong, now(),
+            "INSERT INTO word_mem(word,box,due,seen,right,wrong,last_ts,workspace_id)"
+            " VALUES(?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(word) DO UPDATE SET box=?,due=?,seen=?,right=?,wrong=?,"
+            "last_ts=?,workspace_id=COALESCE(workspace_id, excluded.workspace_id)",
+            (word, box, due, seen, right, wrong, now(), ws_now(),
              box, due, seen, right, wrong, now()))
         con.commit()
         return {"word": word, "box": box, "due": due, "seen": seen,
@@ -653,22 +721,33 @@ def due_words(limit=None):
         con.close()
 
 
-def mem_stats():
+def mem_stats(workspace_id=None):
+    """背词统计。workspace_id 给了就只数这个工作区的词。
+
+    None = 不过滤（全局视图 / 老界面用）。
+    """
     con = connect()
     try:
-        # 入记忆 = 真正练过的词。legacy 批量填充的 84 条不算，否则首页永远写着「入记忆 152 词」
-        n = con.execute("SELECT COUNT(*) c FROM word_mem WHERE " + REAL_MEM_SQL).fetchone()["c"]
-        d = con.execute("SELECT COUNT(*) c FROM word_mem WHERE due<=? AND " + REAL_MEM_SQL,
-                        (today(),)).fetchone()["c"]
+        ws_sql = ""
+        ws_args = []
+        if workspace_id:
+            ws_sql = " AND workspace_id=?"
+            ws_args = [workspace_id]
+        n = con.execute("SELECT COUNT(*) c FROM word_mem WHERE " + REAL_MEM_SQL
+                        + ws_sql, tuple(ws_args)).fetchone()["c"]
+        d = con.execute("SELECT COUNT(*) c FROM word_mem WHERE due<=? AND "
+                        + REAL_MEM_SQL + ws_sql,
+                        tuple([today()] + ws_args)).fetchone()["c"]
         boxes = {r["box"]: r["c"] for r in con.execute(
-            "SELECT box, COUNT(*) c FROM word_mem GROUP BY box").fetchall()}
+            "SELECT box, COUNT(*) c FROM word_mem WHERE 1=1" + ws_sql
+            + " GROUP BY box", tuple(ws_args)).fetchall()}
         return {"words": n, "due_today": d, "boxes": boxes}
     finally:
         con.close()
 
 
 # ------------------------------------------------------- 今日复习队列（到期闭环）
-def review_queue(limit=None):
+def review_queue(limit=None, workspace_id=None):
     """今天到期要复习的词 → 拼上行课表里的音标/词性/释义，能直接喂给卡片。
 
     真源两张表：
@@ -679,8 +758,12 @@ def review_queue(limit=None):
     con = connect()
     try:
         sql = ("SELECT word, box, due, seen, right, wrong FROM word_mem"
-               " WHERE due<=? ORDER BY due, box, word")
+               " WHERE due<=?")
         args = [today()]
+        if workspace_id:
+            sql += " AND workspace_id=?"
+            args.append(workspace_id)
+        sql += " ORDER BY due, box, word"
         if limit:
             sql += " LIMIT ?"
             args.append(int(limit))
@@ -690,9 +773,9 @@ def review_queue(limit=None):
     return rows
 
 
-def review_enriched(limit=None):
+def review_enriched(limit=None, workspace_id=None):
     """到期词 + 词条信息（音标/词性/释义/所属词组）。查不到词条的照实留空。"""
-    rows = review_queue(limit)
+    rows = review_queue(limit, workspace_id=workspace_id)
     p = _proto()
     gw = (p.get("vocab") or {}).get("groups_words") or {}
     idx = {}
@@ -835,10 +918,11 @@ def set_lesson(lesson_id, subject=None, status=None, pos_sec=None):
         pos = float(pos_sec) if pos_sec is not None else (r["pos_sec"] if r else 0)
         sub = subject or (r["subject"] if r else None)
         con.execute(
-            "INSERT INTO lesson_progress(lesson_id,subject,status,pos_sec,updated_ts)"
-            " VALUES(?,?,?,?,?) ON CONFLICT(lesson_id) DO UPDATE SET"
-            " subject=?,status=?,pos_sec=?,updated_ts=?",
-            (lesson_id, sub, st, pos, now(), sub, st, pos, now()))
+            "INSERT INTO lesson_progress(lesson_id,subject,status,pos_sec,"
+            "updated_ts,workspace_id) VALUES(?,?,?,?,?,?) ON CONFLICT(lesson_id)"
+            " DO UPDATE SET subject=?,status=?,pos_sec=?,updated_ts=?,"
+            "workspace_id=COALESCE(workspace_id, excluded.workspace_id)",
+            (lesson_id, sub, st, pos, now(), ws_now(), sub, st, pos, now()))
         con.commit()
         return {"lesson_id": lesson_id, "subject": sub, "status": st, "pos_sec": pos}
     finally:
@@ -881,7 +965,7 @@ def recent_lesson(subject=None):
         con.close()
 
 
-def lessons_done(subject=None):
+def lessons_done(subject=None, workspace_id=None):
     con = connect()
     try:
         sql = "SELECT * FROM lesson_progress WHERE status='done'"
@@ -889,6 +973,9 @@ def lessons_done(subject=None):
         if subject:
             sql += " AND subject=?"
             args.append(subject)
+        if workspace_id:
+            sql += " AND workspace_id=?"
+            args.append(workspace_id)
         return [dict(r) for r in con.execute(sql, args).fetchall()]
     finally:
         con.close()
@@ -900,10 +987,10 @@ def add_answer(qno, part, chosen, ans, ok, uid=None, ts=None,
     con = connect()
     try:
         con.execute(
-            "INSERT INTO answers(ts,qno,part,chosen,ans,ok,uid,source,subject)"
-            " VALUES(?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO answers(ts,qno,part,chosen,ans,ok,uid,source,subject,"
+            "workspace_id) VALUES(?,?,?,?,?,?,?,?,?,?)",
             (ts or now(), int(qno), part, chosen, ans, int(bool(ok)),
-             uid or new_uid(), source, subject))
+             uid or new_uid(), source, subject, ws_now()))
         con.commit()
     finally:
         con.close()
@@ -936,11 +1023,13 @@ def error_by_part():
         con.close()
 
 
-def answer_stats():
+def answer_stats(workspace_id=None):
     con = connect()
     try:
+        ws_sql = " WHERE workspace_id=?" if workspace_id else ""
         r = con.execute(
             "SELECT COUNT(*) n, SUM(CASE WHEN ok=1 THEN 1 ELSE 0 END) ok FROM answers"
+            + ws_sql, ((workspace_id,) if workspace_id else ())
         ).fetchone()
         n = r["n"] or 0
         ok = r["ok"] or 0
@@ -950,11 +1039,13 @@ def answer_stats():
         con.close()
 
 
-def answered_qnos():
+def answered_qnos(workspace_id=None):
     con = connect()
     try:
+        ws_sql = " WHERE workspace_id=?" if workspace_id else ""
         return {r["qno"]: r["ok"] for r in con.execute(
-            "SELECT qno, MAX(ok) ok FROM answers GROUP BY qno").fetchall()}
+            "SELECT qno, MAX(ok) ok FROM answers" + ws_sql + " GROUP BY qno",
+            ((workspace_id,) if workspace_id else ())).fetchall()}
     finally:
         con.close()
 
@@ -1051,9 +1142,11 @@ def save_note(lesson_id, text, pos_sec=0):
     con = connect()
     try:
         con.execute(
-            "INSERT INTO notes(lesson_id,text,pos_sec,updated_ts) VALUES(?,?,?,?)"
-            " ON CONFLICT(lesson_id) DO UPDATE SET text=?,pos_sec=?,updated_ts=?",
-            (lesson_id, text or "", float(pos_sec or 0), now(),
+            "INSERT INTO notes(lesson_id,text,pos_sec,updated_ts,workspace_id)"
+            " VALUES(?,?,?,?,?) ON CONFLICT(lesson_id) DO UPDATE SET text=?,"
+            "pos_sec=?,updated_ts=?,workspace_id=COALESCE(workspace_id,"
+            "excluded.workspace_id)",
+            (lesson_id, text or "", float(pos_sec or 0), now(), ws_now(),
              text or "", float(pos_sec or 0), now()))
         con.commit()
         r = con.execute("SELECT * FROM notes WHERE lesson_id=?", (lesson_id,)).fetchone()
@@ -1081,7 +1174,7 @@ def note_count():
         con.close()
 
 
-def notes_all(limit=300):
+def notes_all(limit=300, workspace_id=None):
     """所有讲次笔记，新的在前。
 
     笔记页要「按课看 / 全部看」两种口径，但 store 只认讲次 —— 科目归属由调用方
@@ -1089,9 +1182,11 @@ def notes_all(limit=300):
     """
     con = connect()
     try:
+        ws_sql = " WHERE workspace_id=?" if workspace_id else ""
+        args = ([workspace_id] if workspace_id else []) + [max(1, int(limit or 300))]
         rows = con.execute(
-            "SELECT lesson_id,text,pos_sec,updated_ts FROM notes"
-            " ORDER BY updated_ts DESC LIMIT ?", (max(1, int(limit or 300)),)).fetchall()
+            "SELECT lesson_id,text,pos_sec,updated_ts FROM notes" + ws_sql +
+            " ORDER BY updated_ts DESC LIMIT ?", tuple(args)).fetchall()
         return [dict(r) for r in rows]
     finally:
         con.close()
@@ -1118,22 +1213,24 @@ def save_canvas(map_id, title=None, tree=None, lesson_id=None, src="local",
     try:
         if ids_s is None:
             con.execute(
-                "INSERT INTO canvas_maps(id,lesson_id,title,src,src_id,tree,updated_ts)"
-                " VALUES(?,?,?,?,?,?,?)"
+                "INSERT INTO canvas_maps(id,lesson_id,title,src,src_id,tree,"
+                "updated_ts,workspace_id) VALUES(?,?,?,?,?,?,?,?)"
                 " ON CONFLICT(id) DO UPDATE SET lesson_id=?, title=?, src=?, src_id=?,"
-                " tree=?, updated_ts=?",
+                " tree=?, updated_ts=?, workspace_id=COALESCE(workspace_id,"
+                "excluded.workspace_id)",
                 (map_id, lesson_id, title, src, src_id,
-                 json.dumps(tree, ensure_ascii=False), now(),
+                 json.dumps(tree, ensure_ascii=False), now(), ws_now(),
                  lesson_id, title, src, src_id,
                  json.dumps(tree, ensure_ascii=False), now()))
         else:
             con.execute(
                 "INSERT INTO canvas_maps(id,lesson_id,lesson_ids,title,src,src_id,"
-                "tree,updated_ts) VALUES(?,?,?,?,?,?,?,?)"
+                "tree,updated_ts,workspace_id) VALUES(?,?,?,?,?,?,?,?,?)"
                 " ON CONFLICT(id) DO UPDATE SET lesson_id=?, lesson_ids=?, title=?,"
-                " src=?, src_id=?, tree=?, updated_ts=?",
+                " src=?, src_id=?, tree=?, updated_ts=?, workspace_id="
+                "COALESCE(workspace_id, excluded.workspace_id)",
                 (map_id, lesson_id, ids_s, title, src, src_id,
-                 json.dumps(tree, ensure_ascii=False), now(),
+                 json.dumps(tree, ensure_ascii=False), now(), ws_now(),
                  lesson_id, ids_s, title, src, src_id,
                  json.dumps(tree, ensure_ascii=False), now()))
         con.commit()
@@ -1231,12 +1328,12 @@ def save_shot(shot_id, subject, file, title=None, lesson_id=None,
     try:
         con.execute(
             "INSERT INTO shots(id,subject,lesson_id,title,file,w,h,bytes,tag,ts,"
-            "origin,pos_sec,src_path)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            "origin,pos_sec,src_path,workspace_id)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(id) DO UPDATE SET subject=?, lesson_id=?, title=?, file=?,"
             " w=?, h=?, bytes=?, tag=?, ts=?, origin=?, pos_sec=?, src_path=?",
             (shot_id, subject, lesson_id, title, file, w, h, nbytes, tag, ts or now(),
-             origin, pos_sec, src_path,
+             origin, pos_sec, src_path, ws_now(),
              subject, lesson_id, title, file, w, h, nbytes, tag, ts or now(),
              origin, pos_sec, src_path))
         con.commit()
@@ -1374,7 +1471,8 @@ def get_shot(shot_id):
         con.close()
 
 
-def list_shots(subject=None, lesson_id=None, limit=200, q=None, origin=None):
+def list_shots(subject=None, lesson_id=None, limit=200, q=None, origin=None,
+               workspace_id=None):
     """列截图。按学科 / 讲次 / 来源筛（不传就是全部），新的在前。
     每行给出 url（前端直接当 img src 用），省得每个调用点自己拼。
     q 是关键词：同时搜标题和讲次 id，大小写不敏感 —— 图一多就得能找。
@@ -1387,6 +1485,9 @@ def list_shots(subject=None, lesson_id=None, limit=200, q=None, origin=None):
     try:
         sql = "SELECT * FROM shots WHERE 1=1"
         args = []
+        if workspace_id:
+            sql += " AND workspace_id=?"
+            args.append(workspace_id)
         if subject:
             sql += " AND subject=?"
             args.append(subject)
@@ -1419,13 +1520,17 @@ def list_shots(subject=None, lesson_id=None, limit=200, q=None, origin=None):
         con.close()
 
 
-def shot_count(subject=None):
+def shot_count(subject=None, workspace_id=None):
     con = connect()
     try:
+        w, a = [], []
         if subject:
-            return con.execute("SELECT COUNT(*) c FROM shots WHERE subject=?",
-                               (subject,)).fetchone()["c"]
-        return con.execute("SELECT COUNT(*) c FROM shots").fetchone()["c"]
+            w.append("subject=?"); a.append(subject)
+        if workspace_id:
+            w.append("workspace_id=?"); a.append(workspace_id)
+        where = (" WHERE " + " AND ".join(w)) if w else ""
+        return con.execute("SELECT COUNT(*) c FROM shots" + where,
+                           tuple(a)).fetchone()["c"]
     finally:
         con.close()
 
@@ -1529,7 +1634,7 @@ def tag_shots(ids, add=None, remove=None):
     return out
 
 
-def list_canvas(lesson_id=None, src=None, limit=100):
+def list_canvas(lesson_id=None, src=None, limit=100, workspace_id=None):
     """列画布。只交摘要（不交整棵树）——列表页要的是「有几张、最后改的啥时候」，
     树太大，塞进列表会把页面撑爆。
 
@@ -1541,6 +1646,8 @@ def list_canvas(lesson_id=None, src=None, limit=100):
         sql = ("SELECT id,lesson_id,lesson_ids,title,src,src_id,updated_ts"
                " FROM canvas_maps")
         w, a = [], []
+        if workspace_id:
+            w.append("workspace_id=?"); a.append(workspace_id)
         if lesson_id:
             # 主讲次匹配，或 (落库晚的) 多讲数组里含它。
             # 用 LIKE 而不是 json1 的 json_each：本机 python 自带 sqlite 不一定编了 json1。
@@ -1592,9 +1699,12 @@ def del_canvas(map_id):
         con.close()
 
 
-def canvas_count():
+def canvas_count(workspace_id=None):
     con = connect()
     try:
+        if workspace_id:
+            return con.execute("SELECT COUNT(*) c FROM canvas_maps"
+                               " WHERE workspace_id=?", (workspace_id,)).fetchone()["c"]
         return con.execute("SELECT COUNT(*) c FROM canvas_maps").fetchone()["c"]
     finally:
         con.close()
@@ -1925,16 +2035,26 @@ def _now_s():
     return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def session_new(focus=None, title=None, provider=None, model=None, sid=None):
-    """开一条新会话，返回它的 id。"""
+def session_new(focus=None, title=None, provider=None, model=None, sid=None,
+                workspace_id=None):
+    """开一条新会话，返回它的 id。
+
+    workspace_id：挂在哪个工作区下。不传就取当前工作区（kv ws.current）——
+    这样新开的会话天然属于「我正在用的那个工作区」，不用界面每次自己传。
+    """
     sid = sid or ("s-%s-%s" % (dt.datetime.now().strftime("%Y%m%d-%H%M%S"),
                                 uuid.uuid4().hex[:4]))
+    if workspace_id is None:
+        try:
+            workspace_id = kv_get("ws.current") or None
+        except Exception:
+            workspace_id = None
     now = _now_s()
     con = connect()
     try:
-        con.execute("INSERT INTO sessions(id,title,focus,provider,model,created_at,updated_at)"
-                    " VALUES(?,?,?,?,?,?,?)",
-                    (sid, title, focus, provider, model, now, now))
+        con.execute("INSERT INTO sessions(id,title,focus,provider,model,created_at,"
+                    "updated_at,workspace_id) VALUES(?,?,?,?,?,?,?,?)",
+                    (sid, title, focus, provider, model, now, now, workspace_id))
         con.commit()
     finally:
         con.close()
@@ -1950,19 +2070,31 @@ def session_get(sid):
         con.close()
 
 
-def session_list(limit=60, include_archived=False):
-    """会话列表，最近改过的在前。带上事件数与最后一句，列表上就能看出聊到哪了。"""
+def session_list(limit=60, include_archived=False, workspace_id=None):
+    """会话列表，最近改过的在前。带上事件数与最后一句，列表上就能看出聊到哪了。
+
+    workspace_id：给了就只列这个工作区下的会话（左栏按工作区展开用）。
+    """
     con = connect()
     try:
-        where = "" if include_archived else "WHERE s.archived=0"
+        conds = []
+        if not include_archived:
+            conds.append("s.archived=0")
+        if workspace_id:
+            conds.append("s.workspace_id=?")
+        where = ("WHERE " + " AND ".join(conds)) if conds else ""
         cols = ("SELECT s.*, "
                 "(SELECT COUNT(*) FROM session_events e WHERE e.session_id=s.id) AS events, "
                 "(SELECT e2.payload FROM session_events e2 WHERE e2.session_id=s.id "
                 " AND e2.kind IN ('turn/start','assistant/message') "
                 " ORDER BY e2.seq DESC LIMIT 1) AS last")
+        qargs = []
+        if workspace_id:
+            qargs.append(workspace_id)
+        qargs.append(int(limit))
         rows = con.execute(cols + " FROM sessions s " + where +
                            " ORDER BY s.updated_at DESC, s.id DESC LIMIT ?",
-                           (int(limit),)).fetchall()
+                           tuple(qargs)).fetchall()
         out = []
         for r in rows:
             d = dict(r)
@@ -1997,6 +2129,50 @@ def session_archive(sid, flag=True):
     try:
         con.execute("UPDATE sessions SET archived=? WHERE id=?", (1 if flag else 0, sid))
         con.commit()
+    finally:
+        con.close()
+
+
+def session_rename(sid, title):
+    """改会话标题。返回改后的行；没有这条会话就 None。"""
+    con = connect()
+    try:
+        row = con.execute("SELECT id FROM sessions WHERE id=?", (sid,)).fetchone()
+        if not row:
+            return None
+        con.execute("UPDATE sessions SET title=?, updated_at=? WHERE id=?",
+                    ((title or "").strip() or None, _now_s(), sid))
+        con.commit()
+        r = con.execute("SELECT * FROM sessions WHERE id=?", (sid,)).fetchone()
+        return dict(r) if r else None
+    finally:
+        con.close()
+
+
+def session_delete(sid):
+    """彻底删一条会话：sessions + session_events 两张表一起清。
+
+    为什么必须一起删：事件表是会话的正文与轨迹，只删 sessions 会留下
+    一堆找不到主人的事件，越积越多还占地方。
+    在一个事务里做，中途失败不会留半条。
+    """
+    con = connect()
+    try:
+        row = con.execute("SELECT id FROM sessions WHERE id=?", (sid,)).fetchone()
+        if not row:
+            return {"ok": False, "error": "没有这条会话"}
+        n_ev = con.execute("SELECT COUNT(*) c FROM session_events WHERE session_id=?",
+                           (sid,)).fetchone()["c"]
+        con.execute("DELETE FROM session_events WHERE session_id=?", (sid,))
+        con.execute("DELETE FROM sessions WHERE id=?", (sid,))
+        con.commit()
+        # 当前会话被删了：把游标清掉，下一条开口时会自动开新的
+        try:
+            if str(kv_get("agent.current_session") or "") == sid:
+                kv_set("agent.current_session", "")
+        except Exception:
+            pass
+        return {"ok": True, "id": sid, "events_deleted": n_ev}
     finally:
         con.close()
 
@@ -2059,7 +2235,7 @@ def ev_max_turn(sid):
         con.close()
 
 
-def session_search(q, limit=30):
+def session_search(q, limit=30, workspace_id=None):
     """按内容搜会话：用户说的话、它回的正文、工具结果摘要都算。
 
     为什么搜 payload 而不是只搜标题：人记得的往往是「那次搜到的那门课」，
@@ -2068,13 +2244,15 @@ def session_search(q, limit=30):
     kw = ("%" + str(q or "").strip() + "%") if str(q or "").strip() else "%"
     con = connect()
     try:
+        ws_sql = " AND s.workspace_id=?" if workspace_id else ""
+        args = [kw, kw] + ([workspace_id] if workspace_id else []) + [int(limit)]
         rows = con.execute(
             "SELECT s.*, (SELECT COUNT(*) FROM session_events e2 WHERE e2.session_id=s.id) AS events"
             " FROM sessions s"
             " WHERE s.archived=0 AND ("
             "   s.title LIKE ? OR EXISTS (SELECT 1 FROM session_events e"
-            "     WHERE e.session_id=s.id AND e.payload LIKE ?))"
-            " ORDER BY s.updated_at DESC LIMIT ?", (kw, kw, int(limit))).fetchall()
+            "     WHERE e.session_id=s.id AND e.payload LIKE ?))" + ws_sql +
+            " ORDER BY s.updated_at DESC LIMIT ?", tuple(args)).fetchall()
         return [dict(r) for r in rows]
     finally:
         con.close()
@@ -2093,9 +2271,12 @@ def session_fork(sid, upto_turn=None, title=None):
     ev = ev_list(src["id"])
     if upto_turn:
         ev = [e for e in ev if int(e.get("turn_no") or 0) <= int(upto_turn)]
+    # 分叉继承**源会话**的工作区，而不是当前工作区 ——
+    # 在 B 里分叉 A 的会话，结果应该留在 A，不然 A 的轨迹被复制进了 B。
     new_sid = session_new(focus=src.get("focus"),
                           title=(title or ((src.get("title") or "会话") + " · 分叉")),
-                          provider=src.get("provider"), model=src.get("model"))
+                          provider=src.get("provider"), model=src.get("model"),
+                          workspace_id=src.get("workspace_id"))
     for e in ev:
         try:
             ev_add(new_sid, e["kind"], e.get("payload") or {},

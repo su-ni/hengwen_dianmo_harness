@@ -92,8 +92,32 @@ def budget():
     两者都没有就老实说没定，不猜一个默认计划。
     """
     fc = plan_file()
-    d = fc.get("exam_date") or store.kv_get(KV_DATE)
-    m = fc.get("minutes_per_day")
+    # 工作区优先：A 的考试日期不该影响 B 的倒计时。
+    # 当前工作区有 exam_date 就用它；没有才回退到老的全局 plan.json。
+    ws_exam = ws_minutes = None
+    ws_quota = None
+    try:
+        from . import workspaces as _wsm
+        con = store.connect()
+        try:
+            cur = _wsm.current(con)
+            if cur:
+                ws_exam = cur.get("exam_date")
+                ws_minutes = cur.get("minutes_per_day")
+                rows = cur.get("subjects") or []
+                if rows:
+                    ws_quota = [{"subject": r["subject_id"],
+                                 "lessons_per_day": r.get("lessons_per_day") or 1}
+                                for r in rows]
+        finally:
+            con.close()
+    except Exception:
+        ws_exam = ws_minutes = ws_quota = None
+
+    d = ws_exam or fc.get("exam_date") or store.kv_get(KV_DATE)
+    m = ws_minutes
+    if m in (None, ""):
+        m = fc.get("minutes_per_day")
     if m is None:
         m = store.kv_get(KV_MIN)
     v = fc.get("vocab_minutes")
@@ -107,11 +131,12 @@ def budget():
         v = int(v) if v not in (None, "") else 0
     except (TypeError, ValueError):
         v = 0
-    q = _quota_rows(fc.get("per_subject"))
+    q = _quota_rows(ws_quota if ws_quota else fc.get("per_subject"))
     out = {"exam_date": d or None, "minutes_per_day": m,
            "vocab_minutes": v, "per_subject": q,
            "set_at": fc.get("set_at") or store.kv_get(KV_SET_AT),
-           "source": "plan.json" if fc else "kv"}
+           "source": "workspace" if (ws_exam or ws_minutes or ws_quota)
+                     else ("plan.json" if fc else "kv")}
     if not q and (not d or not m):
         out["set"] = False
         out["reason"] = ("还没定考试日期和每天时长，也没说每科每天上几节，排不出来 —— "
@@ -147,7 +172,12 @@ def budget():
 
 
 def set_budget(exam_date=None, minutes_per_day=None, vocab_minutes=None, per_subject=None):
-    """写预算。值都是用户给的，系统不做推荐值——推荐值就是编数字。"""
+    """写预算。值都是用户给的，系统不做推荐值——推荐值就是编数字。
+
+    有当前工作区时，**优先写工作区**：budget() 读的是工作区字段，
+    只写全局 kv 的话改完读回来还是旧值（这个不一致修过一次）。
+    全局 kv / plan.json 仍然写，给没有工作区的老路径与 /old 用。
+    """
     if exam_date is not None:
         exam_date = str(exam_date).strip()
         if exam_date:
@@ -178,6 +208,35 @@ def set_budget(exam_date=None, minutes_per_day=None, vocab_minutes=None, per_sub
     if per_subject is not None:
         q = _quota_rows(per_subject)
         _patch_file(per_subject=q or [])
+    # ---- 同步写当前工作区（budget 优先读它）----
+    try:
+        from . import workspaces as _wsm
+        con = store.connect()
+        try:
+            cur = _wsm.current(con)
+            if cur and cur.get("id"):
+                fields = {}
+                if exam_date is not None:
+                    fields["exam_date"] = (str(exam_date).strip() or None)
+                if minutes_per_day is not None:
+                    fields["minutes_per_day"] = int(minutes_per_day)
+                if vocab_minutes is not None:
+                    fields["vocab_minutes"] = int(vocab_minutes)
+                if fields:
+                    _wsm.update(con, cur["id"], **fields)
+                if per_subject is not None:
+                    rows = []
+                    for r in _quota_rows(per_subject) or []:
+                        rows.append({"subject_id": r.get("subject") or r.get("subject_id"),
+                                     "lessons_per_day": r.get("lessons_per_day") or 1})
+                    if rows:
+                        _wsm.set_subjects(con, cur["id"], rows)
+        finally:
+            con.close()
+    except Exception:
+        # 工作区写入失败不该让整次设置失败：全局那份已经写成功了
+        pass
+
     store.kv_set(KV_SET_AT, store.now())
     _patch_file(set_at=store.now())
     # 文件要能自己解释自己：只写了一半的 plan.json，人打开看是「怎么没有日期」。

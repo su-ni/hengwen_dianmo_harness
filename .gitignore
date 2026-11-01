@@ -61,3 +61,16 @@ start_blank*
 start_main.py
 start_bg.ps1
 restart_all.ps1
+
+# 文档仅本机保存，不进仓库（用 git rm --cached，绝不用 filter-repo）
+docs/
+
+# 技能库：内置技能跟项目走，用户自装的放 data/skills
+# （skills/ 要进仓库 —— 它是产品的一部分，不是本机资料）
+
+# 本地验证产物：截图和探针脚本都是「我这台机器上跑过」的痕迹，不进仓库
+outputs/
+tests/
+
+# 根目录下划线开头的临时调试脚本（_dbg_*.py / _fix_*.py 这类）
+/_*.py

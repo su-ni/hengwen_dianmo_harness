@@ -1,0 +1,78 @@
+/* 右键菜单 + 二次确认弹窗 —— 工作区与会话共用。 */
+
+.ctxmenu {
+  position: fixed; z-index: 9000;
+  padding: 5px;
+  background: var(--card);
+  border: 1px solid var(--line2);
+  border-radius: 10px;
+  box-shadow: 0 14px 44px -12px rgba(0, 0, 0, .92), 0 0 0 1px rgba(255, 255, 255, .03);
+  animation: ctxIn .1s var(--ease);
+}
+@keyframes ctxIn { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+
+.ctx-g {
+  padding: 7px 9px 4px;
+  font-size: 10.5px; letter-spacing: .5px; color: var(--tx3);
+}
+.ctx-sep { height: 1px; margin: 4px 6px; background: var(--line2); }
+
+.ctx-i {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  gap: 10px;
+  padding: 7px 9px;
+  border: 0; border-radius: 6px;
+  background: transparent; color: var(--tx2);
+  font: inherit; font-size: 12.5px; text-align: left; cursor: pointer;
+  transition: background .1s var(--ease), color .1s var(--ease);
+}
+.ctx-i:hover:not(:disabled) { background: var(--card2); color: var(--tx); }
+.ctx-i:disabled { opacity: .4; cursor: default; }
+.ctx-i em {
+  font-style: normal; font-size: 10.5px; color: var(--tx3);
+  flex: none; max-width: 96px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ctx-i.danger { color: #e0604f; }
+.ctx-i.danger:hover:not(:disabled) { background: rgba(224, 96, 79, .12); color: #ff7060; }
+
+/* ---- 二次确认 ---- */
+.confirm-box {
+  width: min(400px, calc(100vw - 40px));
+  padding: 20px;
+  background: var(--card);
+  border: 1px solid var(--line2);
+  border-radius: 14px;
+  box-shadow: 0 24px 70px -16px rgba(0, 0, 0, .95);
+}
+.cb-t { display: block; font-size: 14.5px; color: var(--tx); margin-bottom: 8px; }
+.cb-b { margin: 0 0 14px; font-size: 12.5px; line-height: 1.7; color: var(--tx2); }
+.cb-f { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.btn.dgr {
+  background: rgba(224, 96, 79, .16);
+  border-color: rgba(224, 96, 79, .5);
+  color: #ff8070;
+}
+.btn.dgr:hover { background: rgba(224, 96, 79, .26); }
+
+/* 确认框里的勾选项 */
+.cb-opt {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 9px 11px; margin-bottom: 7px;
+  border: 1px solid var(--line2); border-radius: 9px;
+  font-size: 12.5px; color: var(--tx2); cursor: pointer;
+  transition: .12s var(--ease);
+}
+.cb-opt:hover { border-color: var(--line3, var(--line2)); }
+.cb-opt.on { border-color: var(--act); background: rgba(255, 176, 32, .07); color: var(--tx); }
+.cb-opt i {
+  width: 15px; height: 15px; flex: none; margin-top: 1px;
+  border: 1.4px solid var(--line3, #555); border-radius: 50%;
+  display: grid; place-items: center;
+}
+.cb-opt.on i { border-color: var(--act); }
+.cb-opt.on i::after {
+  content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--act);
+}
+.cb-opt b { display: block; color: inherit; font-weight: 600; margin-bottom: 2px; }
+.cb-opt span { display: block; font-size: 11px; color: var(--tx3); line-height: 1.5; }
