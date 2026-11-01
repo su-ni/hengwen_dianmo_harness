@@ -1,0 +1,110 @@
+/* ===== 技能中心 =====
+ * 左边清单、右边正文。清单每项写清「什么时候用」——
+ * 那句话就是模型判断要不要加载它的唯一依据，不该藏在正文里。
+ */
+
+.skwrap { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+
+.skhead {
+  display: flex; align-items: baseline; gap: 12px;
+  padding: 18px 22px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.skhead b { font-size: 15px; color: var(--tx); }
+.skn {
+  margin-left: 8px; padding: 1px 7px; border-radius: 8px;
+  background: var(--line2); color: var(--tx2); font-size: 11px;
+}
+.skexp {
+  margin-left: auto;
+  font-size: 11.5px; color: var(--tx3);
+}
+.skexp code, .skhint code, .skempty code {
+  padding: 1px 5px; border-radius: 4px;
+  background: var(--card2); color: var(--tx2);
+  font-family: var(--fm, ui-monospace, monospace); font-size: 11px;
+}
+
+.sksplit { flex: 1 1 auto; min-height: 0; display: flex; }
+
+.sklist {
+  width: 340px; flex: none;
+  overflow-y: auto; padding: 12px;
+  border-right: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 8px;
+  scrollbar-width: none;
+}
+.sklist::-webkit-scrollbar { display: none; }
+
+.skcard {
+  width: 100%; text-align: left;
+  padding: 12px 13px;
+  border: 1px solid var(--line2); border-radius: 10px;
+  background: transparent; color: var(--tx2);
+  font: inherit; cursor: pointer;
+  transition: .13s var(--ease);
+}
+.skcard:hover { border-color: var(--line3, #555); background: var(--card2); }
+.skcard.on { border-color: var(--act); background: rgba(255, 176, 32, .06); }
+.skcard-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.skcard-top b {
+  font-size: 13px; color: var(--tx); font-weight: 600;
+  font-family: var(--fm, ui-monospace, monospace);
+}
+.sktag {
+  padding: 1px 5px; border-radius: 4px;
+  background: rgba(90, 200, 130, .14); color: #5ac882;
+  font-size: 9.5px; font-style: normal;
+}
+.sktag.alt { background: rgba(90, 200, 250, .14); color: #5ac8fa; }
+.skdesc {
+  display: block; margin-top: 6px;
+  font-size: 11.5px; color: var(--tx2); line-height: 1.6;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.skwhen {
+  display: block; margin-top: 6px;
+  font-size: 10.5px; color: var(--tx3); line-height: 1.55;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.skbody {
+  flex: 1 1 auto; min-width: 0;
+  overflow-y: auto; padding: 16px 22px 30px;
+  scrollbar-width: none;
+}
+.skbody::-webkit-scrollbar { display: none; }
+.skbody-h {
+  display: flex; align-items: baseline; gap: 9px;
+  padding-bottom: 10px; margin-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.skbody-h b {
+  font-size: 14px; color: var(--tx);
+  font-family: var(--fm, ui-monospace, monospace);
+}
+.skbody-h em { font-style: normal; font-size: 11px; color: var(--tx3); }
+.skpre {
+  margin: 0;
+  font-family: var(--fm, ui-monospace, monospace);
+  font-size: 12px; line-height: 1.85; color: var(--tx2);
+  white-space: pre-wrap; word-break: break-word;
+}
+
+.skempty {
+  flex: 1 1 auto;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 8px; padding: 40px 30px; text-align: center;
+  color: var(--tx3); font-size: 12.5px;
+}
+.skempty p { margin: 0; line-height: 1.75; }
+.skempty-ic {
+  width: 48px; height: 48px; border-radius: 12px;
+  display: grid; place-items: center;
+  background: var(--card2); color: var(--tx3);
+  margin-bottom: 4px;
+}
+.skhint { font-size: 11.5px; }

@@ -452,7 +452,8 @@ def migrate_legacy_thread():
         if isinstance(r, dict) and r.get("role") == "user" and (r.get("content") or "").strip():
             title = (r.get("content") or "").strip()[:40]
             break
-    sid = store.session_new(focus="today", title=title, provider=None, model=None)
+    sid = store.session_new(focus="today", title=title, provider=None, model=None,
+                            workspace_id=(store.kv_get("ws.current") or None))
     turn = 0
     for r in rows:
         if not isinstance(r, dict):
@@ -508,13 +509,29 @@ def cur_session(focus=None, provider=None, model=None):
             switch = True
         if model and (s.get("model") or "") and s["model"] != model:
             switch = True
+        # 工作区变了也要新开：A 的会话不能被 B 继续写，
+        # 否则「在 B 里聊的天」全落进 A 的轨迹里，两边都读不懂。
+        try:
+            _wid = store.kv_get("ws.current") or None
+        except Exception:
+            _wid = None
+        if (s.get("workspace_id") or None) != _wid:
+            switch = True
     if (not s) or switch:
         # 第一次升级上来：kv 里有旧对话就先把它转成会话，别让它在切会话时丢掉
         if not s and not switch and not sid:
             _m = migrate_legacy_thread()
             if _m:
                 return _m, store.ev_max_turn(_m) + 1, False
-        sid = store.session_new(focus=focus, provider=provider, model=model)
+        # 新会话挂到当前工作区下：这样「在 A 里聊的天」就归在 A 名下，
+        # 左栏 A 展开能看到；切到 B 时看不到 A 的对话。
+        _wid = None
+        try:
+            _wid = store.kv_get("ws.current") or None
+        except Exception:
+            _wid = None
+        sid = store.session_new(focus=focus, provider=provider, model=model,
+                                workspace_id=_wid)
         store.kv_set(KV_CUR, sid)
         return sid, 1, True
     return sid, store.ev_max_turn(sid) + 1, False
@@ -658,8 +675,30 @@ def history(limit=40):
     # 界面优先从事件流重建：只有它带 turn_no（「从这一轮分叉」要用）。
     # kv 那份只是模型上下文，缺字段，当兜底。
     sid = str(store.kv_get(KV_CUR) or "")
+    # 会话必须属于当前工作区，否则不返回它的内容 ——
+    # 否则切到新工作区还会看到上一个工作区的对话（隔离漏洞）。
+    #
+    # 注意「没有 workspace_id 的会话」也算不匹配：那种会话是加隔离之前
+    # 建的，谁都不属于。放它进来等于隔离没做（这个坑踩过一次）。
+    _wid = None
+    try:
+        _wid = store.kv_get("ws.current") or None
+    except Exception:
+        _wid = None
+    if sid:
+        try:
+            _s = store.session_get(sid)
+            if _s is None:
+                sid = ""
+            elif _wid and (_s.get("workspace_id") or None) != _wid:
+                sid = ""
+        except Exception:
+            sid = ""
+
     rows = _rows_from_events(sid) if sid else []
-    if not rows:
+    # 兜底只在这个工作区**还没有任何会话**时才读 kv 里的旧上下文；
+    # 有工作区且有会话时绝不读全局 kv —— 那是上一个工作区的东西。
+    if not rows and sid:
         rows = [_clean_row(x) for x in _load()]
         rows = [r for r in rows if r]
     return {"ok": True, "messages": rows[-limit:], "count": len(rows),
@@ -683,7 +722,8 @@ def reset():
         except Exception:
             kept = 0
     store.kv_set(KV_THREAD, "[]")
-    sid = store.session_new(focus="agent")
+    sid = store.session_new(focus="agent",
+                            workspace_id=(store.kv_get("ws.current") or None))
     store.kv_set(KV_CUR, sid)
     return {"ok": True, "note": "对话记录已清空，新会话已开。下次开口就是新的。",
             "kept": kept, "bak": (KV_THREAD_BAK if kept else None), "session": sid}
@@ -1185,6 +1225,10 @@ def _ui_of(name, data):
     界面要的是**完整但精简**：只留挑课要看的六个字段，最多八条。
     """
     _remember_cand(name, data)     # 顺手记进候选表：下一轮模型要拿 bvid 直接入库
+    if name == "plan_doc_write" and isinstance(data, dict) and data.get("id"):
+        return {"kind": "plan", "id": data.get("id"),
+                "title": data.get("title") or "计划",
+                "status": data.get("status") or "draft"}
     if not isinstance(data, dict):
         return None
     if name in ("bili_search", "web_search", "search_all"):
@@ -1607,7 +1651,31 @@ def _sys_prompt(eff="medium", focus=None):
     """
     # 按当前页面收窄能力清单：全量 16 类 2799 字，收窄后约 1200 字。
     # 收窄不是藏能力 —— 没展开的类会在末尾点名，让模型用 find_tool 现查。
-    return SYS.replace("%CATALOG%", tools.catalog_text(focus=focus)) + _EFFORT_PROMPT.get(eff, "")
+    base = SYS.replace("%CATALOG%", tools.catalog_text(focus=focus)) + _EFFORT_PROMPT.get(eff, "")
+    # 模式说明接在最后：计划模式必须让模型自己知道「这一轮只读」，
+    # 否则它还是会去调写盘工具，然后被工具闸挡回来、白跑一轮。
+    try:
+        from . import modes
+        note = modes.prompt_note()
+        if note:
+            base += "\n\n" + note
+    except Exception:
+        pass
+    # 技能目录：只给名字 + 什么时候用。正文用 skill 工具现取 ——
+    # 全塞进来会把上下文撑爆，而多数轮次一个技能都用不上。
+    try:
+        from . import skills as _sk
+        _cat = _sk.catalog()
+        if _cat:
+            _lines = ["", "【可用技能】需要时用 skill(name) 取正文，不要凭空猜流程："]
+            for _it in _cat:
+                _d = _it.get("description") or ""
+                _lines.append("- " + _it["name"] + "：" + _d[:120])
+            base += chr(10).join(_lines)
+    except Exception:
+        pass
+
+    return base
 
 
 # ---------------------------------------------------------------- 一轮对话
@@ -2572,23 +2640,51 @@ _EFFORT_PROMPT = {
 
 
 def effort():
+    """当前模型的推理档位：档位集合**由模型决定**（见 server/efforts.py）。
+
+    为什么不能一律列七档：上游目录不回档位信息，各模型能接受的档不同；
+    列了模型不认的档，用户点下去只会拿到 400 —— 比不显示更糟。
+
+    返回里必须带 model / provider：界面常态显示「模型名 · 档位」，
+    少了这两个字段就成了「未选模型」（这个 bug 出过一次）。
+    """
+    from . import efforts as _ef
+    model = model_router.model_of() or ""
+    levels, matched = _ef.levels_for(model)
     cur = str(store.kv_get(RKV_EFFORT) or "medium").lower()
-    if cur not in _EFFORT_WHY:
-        cur = "medium"
-    return {"ok": True, "current": cur,
-            "levels": [{"k": k, "why": v, "on": k == cur} for k, v in _EFFORT_WHY.items()],
-            "note": "三档改的是「回答要多细」：低档只要结论（实测 158 字），"
-                    "高档先逐条分析再下结论（实测 2601 字）。"
-                    "上游的 reasoning_effort 字段也照传，但实测对思考量没有可辨影响，"
-                    "真正起作用的是提示词；没有「完全关掉思考」这一档。"}
+    if cur not in levels:
+        cur, _ = _ef.pick(model, cur)
+    return {
+        "ok": True,
+        "current": cur,
+        "model": model,
+        "provider": model_router.current(),
+        "levels": [{"k": k, "label": _ef.LABEL.get(k, k),
+                    "why": _ef.WHY.get(k, ""), "on": k == cur} for k in levels],
+        "matched": matched,
+        "note": "" if matched else (
+            "这个模型没登记过档位，先按通用档（off→high）给；模型不认的档上游会拒。"),
+    }
 
 
 def set_effort(level=None):
+    from . import efforts as _ef
+    model = model_router.model_of() or ""
+    levels, _ = _ef.levels_for(model)
     k = str(level or "").strip().lower()
-    if k not in _EFFORT_WHY:
-        return {"ok": False, "error": "只有 low / medium / high 三档，收到的是 %r" % (level,)}
+    if k not in _ef.WHY:
+        return {"ok": False,
+                "error": "推理档位只认 %s，收到的是 %r"
+                         % (" / ".join(_ef.WHY), level)}
+    if k not in levels:
+        return {"ok": False,
+                "error": "%s 不支持 %s 档，它能用的档是 %s"
+                         % (model, _ef.LABEL.get(k, k),
+                            " / ".join(_ef.LABEL.get(x, x) for x in levels))}
     store.kv_set(RKV_EFFORT, k)
-    return {"ok": True, "current": k, "why": _EFFORT_WHY[k]}
+    return {"ok": True, "current": k, "model": model,
+            "levels": [{"k": x, "label": _ef.LABEL.get(x, x),
+                        "why": _ef.WHY.get(x, ""), "on": x == k} for x in levels]}
 
 
 def info():

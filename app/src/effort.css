@@ -1,20 +1,156 @@
-/* 输入框旁边的「回答要多细」三档。
-   跟模型选择器并排：一个是「谁来答」，一个是「答多细」，都是发出去之前要定的。
-   不做下拉 —— 三档而已，摆成一排一眼看全，少一次点击。 */
+/* 推理档位：触发按钮 + 带滑杆的浮层。
+ *
+ * 三条硬约束（都是改出来的）：
+ *  1. 浮层 fixed 定位（坐标由 usePopover 算），不靠父级 overflow 裁 —— 输入框
+ *     在页面最底，绝对定位的面板会顶出视口。
+ *  2. 刻度用 grid 等分，字号按档位数自适应，不允许出现「Mini…」「Med…」被
+ *     截断的情况 —— 档位名是这控件的全部信息，截了就等于没写。
+ *  3. 已选段用品牌渐变，滑动块是白色圆点，不做整块实心描边（那样太像警告）。 */
 
-.eff{position:relative;display:flex;align-items:center;gap:0;flex:none;
-  height:28px;padding:2px;border-radius:var(--rp);
-  background:var(--card2);border:1px solid var(--line)}
-.eff-b{height:22px;padding:0 9px;border-radius:var(--rp);border:none;background:none;
-  color:var(--tx3);font-size:11.5px;cursor:pointer;white-space:nowrap;
-  transition:background .15s var(--ease),color .15s var(--ease)}
-.eff-b:hover:not(.on):not(:disabled){color:var(--tx2)}
-.eff-b.on{background:var(--act);color:var(--onact);font-weight:600}
-.eff-b:disabled{opacity:.5;cursor:default}
-.eff-tip{position:absolute;left:0;bottom:calc(100% + 8px);z-index:95;width:262px;
-  background:var(--card);border:1px solid var(--line2);border-radius:var(--r2);
-  box-shadow:0 -8px 34px -12px rgba(0,0,0,.8);padding:9px 11px;
-  font-size:11.5px;line-height:1.65;color:var(--tx2);white-space:normal;
-  animation:pageIn .14s var(--ease)}
-.eff-tip b{color:var(--tx);display:block;margin-bottom:3px;font-size:12px}
-.eff-tip em{display:block;margin-top:5px;color:var(--tx3);font-style:normal;font-size:11px}
+.eff {
+  position: relative; display: flex; align-items: center; flex: none;
+  height: 28px;
+}
+
+/* ---- 触发 ---- */
+.eff-trig {
+  display: inline-flex; align-items: center; gap: 6px; height: 26px;
+  padding: 0 9px; border-radius: 999px;
+  background: var(--card2); border: 1px solid var(--line);
+  color: var(--tx2); font: inherit; font-size: 12px; cursor: pointer;
+  white-space: nowrap;
+  transition: border-color .14s var(--ease), color .14s var(--ease), background .14s var(--ease);
+}
+.eff-trig:hover:not(:disabled) { border-color: var(--line2); color: var(--tx); }
+.eff-trig.on { border-color: var(--act); color: var(--tx); background: rgba(255, 176, 32, .07); }
+.eff-trig:disabled { opacity: .5; cursor: default; }
+.eff-cur { line-height: 1; }
+.eff-cv { color: var(--tx3); flex: none; transition: transform .15s var(--ease); }
+.eff-trig.on .eff-cv { transform: rotate(180deg); }
+
+.eff-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex: none;
+  background: var(--act);
+  box-shadow: 0 0 0 3px rgba(255, 176, 32, .14);
+}
+
+/* ---- 浮层（fixed：坐标由 JS 给）---- */
+.eff-pop {
+  position: fixed; z-index: 200;
+  width: 316px; max-width: calc(100vw - 16px);
+  display: flex; flex-direction: column;
+  padding: 13px 14px 12px;
+  background: var(--card); border: 1px solid var(--line2); border-radius: 13px;
+  box-shadow: 0 14px 48px -12px rgba(0, 0, 0, .9), 0 0 0 1px rgba(255, 255, 255, .03);
+  animation: effIn .14s var(--ease);
+  overflow: hidden;
+}
+@keyframes effIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.eff-pop.up { transform-origin: bottom center; }
+.eff-pop.down { transform-origin: top center; }
+
+.eff-pop-h {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 10px; margin-bottom: 12px; flex: none;
+}
+.eff-pop-h b { font-size: 13px; font-weight: 650; color: var(--tx); letter-spacing: .2px; }
+.eff-pop-v { font-size: 12px; color: var(--act); font-weight: 650; letter-spacing: .3px; }
+
+/* ---- 刻度：grid 等分，绝不截断 ---- */
+.eff-ticks {
+  display: grid; gap: 1px;
+  margin-top: 10px; flex: none;
+}
+.eff-tick {
+  min-width: 0;
+  padding: 4px 1px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--tx3);
+  font: inherit; font-size: 10.5px; line-height: 1.2;
+  cursor: pointer; text-align: center;
+  /* 档位名短（最长 6 个字符），用正常的换行策略；
+     之前的省略号来自 nowrap + ellipsis，直接去掉 */
+  white-space: normal; word-break: keep-all;
+  transition: color .12s var(--ease), background .12s var(--ease);
+}
+.eff-tick:hover { color: var(--tx2); background: var(--card2); }
+.eff-tick.on {
+  color: var(--act); font-weight: 700;
+  background: rgba(255, 176, 32, .12);
+  box-shadow: inset 0 0 0 1px rgba(255, 176, 32, .28);
+}
+
+.eff-why {
+  margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--line);
+  font-size: 11.5px; line-height: 1.65; color: var(--tx2);
+  flex: none;
+}
+
+
+/* ===== 模式选择器（标准 / 计划 / 自动）=====
+ * 放在工具行里、权限档左边。计划模式要一眼看出「只读」——
+ * 因为它承诺不动本机，看错档位会让人以为「怎么点了没反应」。
+ */
+.modewrap { position: relative; flex: none; }
+
+.modebtn {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 28px; padding: 0 9px;
+  border: 1px solid var(--line2); border-radius: 8px;
+  background: transparent; color: var(--tx2);
+  font: inherit; font-size: 12px; cursor: pointer;
+  transition: .13s var(--ease);
+  white-space: nowrap;
+}
+.modebtn:hover:not(:disabled) { border-color: var(--line3, #555); color: var(--tx); }
+.modebtn.on { border-color: var(--act); color: var(--act); }
+.modebtn.plan {
+  border-color: rgba(160, 107, 255, .55);
+  color: #b58cff;
+  background: rgba(160, 107, 255, .08);
+}
+.modebtn:disabled { opacity: .45; cursor: default; }
+.modebtn .eff-cv { opacity: .6; flex: none; }
+
+.modepop {
+  position: absolute; bottom: calc(100% + 8px); left: 0;
+  width: 236px; z-index: 240;
+  padding: 6px;
+  background: var(--card);
+  border: 1px solid var(--line2);
+  border-radius: 12px;
+  box-shadow: 0 16px 44px -14px rgba(0, 0, 0, .95);
+  animation: modeIn .13s var(--ease);
+}
+@keyframes modeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+
+.modepop-h {
+  padding: 7px 9px 5px;
+  font-size: 10.5px; letter-spacing: .4px; color: var(--tx3);
+}
+.modeitem {
+  width: 100%; display: block;
+  padding: 8px 9px; margin-bottom: 2px;
+  border: 0; border-radius: 8px;
+  background: transparent; color: var(--tx2);
+  font: inherit; text-align: left; cursor: pointer;
+  transition: background .12s var(--ease);
+}
+.modeitem:hover { background: var(--card2); }
+.modeitem.on { background: var(--card2); }
+.modeitem-top { display: flex; align-items: center; gap: 6px; }
+.modeitem-top b { font-size: 12.5px; color: var(--tx); font-weight: 600; }
+.modeitem-top svg { margin-left: auto; color: var(--act); }
+.modeitem span {
+  display: block; margin-top: 3px;
+  font-size: 10.5px; color: var(--tx3); line-height: 1.5;
+}
+.tagro {
+  padding: 1px 5px; border-radius: 4px;
+  background: rgba(160, 107, 255, .16);
+  color: #b58cff; font-size: 9.5px; font-style: normal;
+}
+.modepop-f {
+  padding: 7px 9px 3px;
+  font-size: 10px; color: var(--tx3); line-height: 1.55;
+  border-top: 1px solid var(--line2); margin-top: 4px;
+}

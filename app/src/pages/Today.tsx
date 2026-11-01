@@ -136,9 +136,10 @@ function Cards({ go }: { go: Go }) {
 export function Today({ go }: { base: Base; go: Go }) {
   /* 默认就是聊天。卡片看板还在，靠聊天框右上角那个键切过来 ——
      它不再是「AI 主导 / 卡片主导」两个并列模式，而是一个主界面和一个辅助视图。 */
-  const [cards, setCards] = useState<boolean>(() => {
-    try { return sessionStorage.getItem(MODE_KEY) === 'cards' } catch { return false }
-  })
+  /* 默认（也是每次进来）都是对话。不再从 sessionStorage 记着「上次切到了卡片」——
+     那样进工作区第一眼还是卡片，跟「点进去先看对话」矛盾。
+     卡片仍可一键切过去，但只对本次有效。 */
+  const [cards, setCards] = useState<boolean>(false)
   const toggle = () => {
     const v = !cards
     setCards(v)

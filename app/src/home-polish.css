@@ -1,0 +1,170 @@
+/* ===== 首屏 UI 精修（2026-10-31 第二轮）=====
+ *
+ * 第一版做完功能没看页面，实测有 5 处明显缺陷：
+ *   1. 工具栏挤成 47px 高，「+」被挤到第二行
+ *   2. 搜索框只剩 22px 高，几乎看不清
+ *   3. 搜索框左右贴边不齐（内边距与列表不一致）
+ *   4. 对话消息全贴右，助手那侧只有光秃秃的字，看不出谁在说
+ *   5. 刻度轨跑到屏幕最右边缘外
+ * 这个文件专门修这些，不动功能逻辑。
+ */
+
+/* ---------------- 1. 左栏标题行：一行放下四个控件 ---------------- */
+.dr-sec {
+  display: flex; align-items: center;
+  gap: 6px;
+  padding: 14px 14px 6px 16px;
+  height: 34px;          /* 固定高度，别让工具按钮把行撑高 */
+  box-sizing: border-box;
+}
+.dr-sec > span {
+  flex: 1 1 auto;
+  font-size: 11px; letter-spacing: .4px; color: var(--tx3);
+}
+
+.dr-tools {
+  display: flex; align-items: center; gap: 1px;
+  flex: none;            /* 关键：不被标题挤到换行 */
+}
+.dr-tool {
+  width: 24px; height: 24px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 6px; background: transparent;
+  color: var(--tx3); font: inherit; font-size: 10.5px; cursor: pointer;
+  transition: .12s var(--ease);
+}
+.dr-tool:hover { background: var(--card2); color: var(--tx); }
+.dr-tool.on { background: rgba(255, 176, 32, .13); color: var(--act); }
+.dr-add {
+  width: 24px; height: 24px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 6px; background: transparent;
+  color: var(--tx3); cursor: pointer;
+}
+.dr-add:hover { color: var(--act); background: var(--card2); }
+
+/* ---------------- 2. 搜索框：与列表左右对齐、高度 30px ---------------- */
+.dr-searchwrap {
+  position: relative;
+  padding: 2px 10px 8px;    /* 与 .dr-list 的 10px 内边距对齐 */
+}
+.dr-search {
+  width: 100%; box-sizing: border-box;
+  height: 30px;
+  padding: 0 26px 0 10px;
+  background: var(--card2);
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  color: var(--tx); font: inherit; font-size: 12.5px;
+  outline: none;
+  transition: border-color .13s var(--ease), background .13s var(--ease);
+}
+.dr-search::placeholder { color: var(--tx3); }
+.dr-search:focus { border-color: var(--act); background: var(--card); }
+/* 有内容时把清空键露出来 */
+.dr-searchwrap.has .dr-search { padding-right: 26px; }
+.dr-searchx {
+  position: absolute; right: 16px; top: 8px;
+  width: 18px; height: 18px;
+  display: grid; place-items: center;
+  border: 0; border-radius: 4px; background: transparent;
+  color: var(--tx3); cursor: pointer;
+}
+.dr-searchx:hover { color: var(--tx); background: var(--line2); }
+
+/* ---------------- 3. 对话消息：左右分明、有身份 ---------------- */
+.dm-flow {
+  /* 居中但别贴边：左右各留 28px，且给刻度轨留 36px */
+  max-width: 800px;
+  padding: 24px 40px 12px 28px;
+  gap: 18px;
+}
+.dm-msg { display: flex; align-items: flex-start; gap: 9px; width: 100%; }
+.dm-msg.user { justify-content: flex-end; }
+
+/* 助手：左边一个很小的圆点当「头像位」，不加边框不占地方 */
+.dm-msg.assistant::before {
+  content: '';
+  width: 5px; height: 5px; flex: none;
+  margin-top: 9px;
+  border-radius: 50%;
+  background: var(--act);
+  opacity: .75;
+}
+.dm-say {
+  flex: 1 1 auto; min-width: 0;
+  max-width: 86%;
+  padding: 0;
+  color: var(--tx);
+  font-size: 13.5px; line-height: 1.78;
+}
+.dm-say pre {
+  margin: 0; white-space: pre-wrap; word-break: break-word; font: inherit;
+}
+
+/* 用户：琥珀气泡，不要那截直角的尾巴（看着像没画完） */
+.dm-bub {
+  max-width: 74%;
+  padding: 10px 14px;
+  background: var(--act); color: var(--onact);
+  border-radius: 13px;
+  font-size: 13.5px; line-height: 1.65;
+  white-space: pre-wrap; word-break: break-word;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .14);
+}
+
+/* ---------------- 4. 刻度轨：贴对话区右缘，不跑出屏幕 ---------------- */
+.rail-turn {
+  right: 4px;
+  width: 20px;
+}
+
+/* ---------------- 5. 输入框：底部呼吸感 ---------------- */
+.dm-dock { padding: 0 28px 22px; }
+.dm-dock .dock-in { max-width: 800px; }
+.dm-box { border-radius: 14px; }
+.dm-box textarea { font-size: 13.5px; }
+
+/* 状态条：与输入框同宽、居中、颜色别太跳 */
+.dm-stat { max-width: 800px; margin: 10px auto 0; }
+
+/* 顶部空态封面：往下压一点，别顶在屏幕最上方 */
+.dm-mid { padding-bottom: 40px; }
+
+/* ---------------- 6. 对话区第二轮精修 ----------------
+ * 实测问题：
+ *   · 助手回复只有几个字时，左边一个点在几百像素宽的空白里，像没内容
+ *   · 消息上下间距 18px 仍显散，长对话要滚很久
+ *   · 刻度轨贴在屏幕最右，离内容太远
+ */
+
+/* 消息间距收紧，但气泡内部仍留呼吸 */
+.dm-flow { gap: 12px; padding-top: 20px; }
+
+/* 助手那块：给个极浅的底 + 左内边距，让「一行字」也有归属感 */
+.dm-say {
+  padding: 2px 0 2px 9px;
+  border-left: 1.5px solid var(--line2);
+  max-width: min(86%, 660px);
+}
+/* 只有一两个字时不至于看起来像空块 */
+.dm-say pre { min-height: 1em; }
+
+/* 用户气泡右边距：别顶到滚动区最右 */
+.dm-msg.user { padding-right: 2px; }
+
+/* 刻度轨：跟着内容居中，不贴屏幕边 */
+/* 刻度轨：贴着对话内容区右缘（dmain 右缘内 6px），不追屏幕边 */
+.rail-turn { right: 6px; }
+
+/* 空态封面：标与标语之间的间距再收一点 */
+.dm-mid { gap: 6px; }
+
+/* 流式/长对话：底部给输入框留出真正的空位，别让最后一句话被挡住。
+   dm-dock 高度约 120px（textarea + 工具行 + 状态条），这里留 150px 富余。 */
+.dmain.started .dm-flow { padding-bottom: 150px; }
+
+/* 输入框实测高度由 JS 写进 --dockh；消息流底部按它留位，最后一行不会被压住。 */
+.dmain.started .dm-flow {
+  padding-bottom: calc(var(--dockh, 132px) + 20px);
+}

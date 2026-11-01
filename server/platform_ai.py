@@ -603,6 +603,7 @@ def _sse_stats(text):
     会当成「模型坏了」——其实是我们选错了模型，这两句必须分开说。
     """
     body, think, stop = [], [], ""
+    usage = {}
     for piece in _SSE_DATA.findall(text or ""):
         piece = piece.strip()
         if not piece or piece == "[DONE]":
@@ -612,7 +613,14 @@ def _sse_stats(text):
         except Exception:
             continue
         if not isinstance(o, dict):
-            continue    # 同 _sse_text：非 dict 片段直接跳过，不让 .get 炸掉整条流
+            continue
+        # 上游在最后一片里带 usage（OpenAI 形状）；Trae 单独发 token_usage。
+        _u = o.get("usage") if isinstance(o.get("usage"), dict) else None
+        if _u:
+            usage = _u
+        _tu = o.get("token_usage") if isinstance(o.get("token_usage"), dict) else None
+        if _tu:
+            usage = _tu    # 同 _sse_text：非 dict 片段直接跳过，不让 .get 炸掉整条流
         if isinstance(o.get("response"), str) and o["response"]:
             body.append(o["response"])
         for ch in (o.get("choices") or []):
@@ -626,7 +634,7 @@ def _sse_stats(text):
     # think 回的是原文，不是字数：_wb_result 要拿它去 _act_in_think 里捞动作，
     # 传个 int 过去那边一 .strip() 就炸（2026-10-30 实测：hy3 只思考不说话时必抛
     # "'int' object has no attribute 'strip'"）。字数由调用方自己 len()。
-    return "".join(body), "".join(think), stop
+    return "".join(body), "".join(think), stop, usage
 
 
 _ACT_RE = re.compile(r'\{\s*"action"\s*:.*?\}\s*$', re.S)
@@ -658,9 +666,20 @@ def _act_in_think(think_text):
 
 
 def _wb_result(raw, model, reason):
-    """把 WorkBuddy 的 SSE 收成一个统一形状的结果，并且能分辨「只思考没说话」。"""
-    body, think, stop = _sse_stats(raw)
+    """把 WorkBuddy 的 SSE 收成一个统一形状的结果，并且能分辨「只思考没说话」。
+
+    顺手把这一轮的 usage 记进 LAST：非流式调用没有 end 帧，
+    不在这里记的话，首屏与工具台的状态条永远拿不到 token 用量。
+    """
+    _t0 = time.time()
+    body, think, stop, usage = _sse_stats(raw)
     if body:
+        try:
+            # 这里的耗时只是「解析这段 SSE」的时间，不含网络往返（拿不到），
+            # 所以传 None：宁可不写速度，也不写一个错的。
+            _stamp_usage("workbuddy", model, usage, t0=None)
+        except Exception:
+            pass
         return {"ok": True, "text": body, "model": model, "reason": reason}
     if think:
         # 思考里已经想好了下一步要调什么 —— 那就当它说了，别浪费这一轮。
@@ -745,14 +764,20 @@ def _stamp_usage(provider, model, usage, t0):
     「真」的标准：全是上游 token_usage 里数出来的字段。拿不到就没有这一项，
     状态条宁可缺一块，也不给一个估出来的数字。
     """
-    ms = max(int((time.time() - (t0 or time.time())) * 1000), 1)
-    out = {"provider": provider, "model": model, "ms": ms}
+    out = {"provider": provider, "model": model}
+    # 没有开始时间就不算耗时与速度 —— 拿 1ms 除出来的 tok_s 是假数字，
+    # 状态条上写「256000 tok/s」比不写更坏。
+    if t0:
+        ms = max(int((time.time() - t0) * 1000), 1)
+        out["ms"] = ms
+    else:
+        ms = 0
     u = usage or {}
     for k in ("prompt_tokens", "completion_tokens", "total_tokens",
               "cache_read_input_tokens", "reasoning_tokens"):
         if isinstance(u.get(k), int):
             out[k] = u[k]
-    if out.get("completion_tokens"):
+    if ms and out.get("completion_tokens"):
         out["tok_s"] = round(out["completion_tokens"] / (ms / 1000.0), 1)
     # 上下文占用：prompt / 这个模型的上下文窗口（窗口是选模型时从目录存下来的）
     try:
@@ -900,20 +925,26 @@ def chat(provider, system, user, model=None, temperature=None, max_tokens=None, 
     return {"ok": False, "reason": "不认识的平台：%s" % provider, "text": None, "model": None}
 
 
-_EFFORTS = ("low", "medium", "high")
+# 推理档位：按模型自己的那套来，不另造中文三档。
+# 取值集合对齐 DeepSeek Harness / 各家 reasoning_effort 的公共命名：
+#   off / minimal / low / medium / high / xhigh / max
+# 模型不认某一档时由上游报错 —— 我们照传，不偷偷降级成别的档
+# （偷偷降级 = 界面显示 high 实际跑 low，比不设更坏）。
+_EFFORTS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
 
 
 def _effort_of(v):
-    """把界面上传的值收成三档之一。不合法就返回 None —— 宁可不传，
-    也不给上游塞一个它不认识的字符串（那样等于没设，还会让人以为生效了）。"""
+    """把界面上传的值收成推理档位之一。不合法返回 None —— 宁可不传，
+    也不给上游塞一个它不认识的字符串（那样等于没设，还让人以为生效了）。"""
     k = str(v or "").strip().lower()
-    if k in ("low", "l", "1", "低", "少"):
-        return "low"
-    if k in ("medium", "mid", "m", "2", "中"):
-        return "medium"
-    if k in ("high", "h", "3", "高", "多"):
-        return "high"
-    return None
+    if k in _EFFORTS:
+        return k
+    # 兼容历史值（老库 kv 里可能存着中文或 1/2/3）
+    legacy = {"低": "low", "少": "low", "1": "low",
+              "中": "medium", "2": "medium",
+              "高": "high", "多": "high", "3": "high",
+              "mid": "medium", "m": "medium", "l": "low", "h": "high"}
+    return legacy.get(k)
 
 
 def chat_stream(provider, system, user, model=None, temperature=None,

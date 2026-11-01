@@ -343,11 +343,18 @@ def _card_items(card_id):
     return (c or {}).get("items") or []
 
 
-def exam_paper_meta():
-    """卷元信息（含真实题量、真实已答/对错数），不带题目正文。"""
-    state = store.exam_state_all()
+def exam_paper_meta(subject_ids=None, workspace_id=None):
+    """卷元信息（含真实题量、真实已答/对错数），不带题目正文。
+
+    subject_ids：只算这些科目的卷（工作区隔离用）。给了就过滤。
+    workspace_id：作答数只算这个工作区。
+    """
+    state = store.exam_state_all(workspace_id=workspace_id)
+    allow = set(subject_ids) if subject_ids is not None else None
     out = []
     for p in exam_papers().get("papers") or []:
+        if allow is not None and p.get("subject") not in allow:
+            continue
         pid = p.get("id")
         st = state.get(pid) or {}
         total = sum(len(g.get("questions") or []) for g in p.get("groups") or [])
@@ -776,7 +783,7 @@ def vocab_owner(proto_data=None):
 
 
 # ---------------------------------------------------------------- 首屏
-def bootstrap(include_lessons=False):
+def bootstrap(include_lessons=False, workspace_id=None):
     """首屏快照。
 
     include_lessons=False（默认）时 subjects[] 里**不带** lessons：889 讲的完整数组
@@ -795,13 +802,42 @@ def bootstrap(include_lessons=False):
     这种要查半天的怪事。
 
     老调用方要完整 lessons 就传 include_lessons=True（HTTP 上是 /api/base?full=1）。
+
+    workspace_id：给了就只返回这个工作区登记过的科目（workspace_subs）。
+    工作区没登记任何科目时返回空数组 —— 这是有意的：界面该显示「这个工作区
+    还没挂科目」，而不是把全局五科端出来假装隔离。None 时保持旧的「全部科目」。
     """
     p = proto()
-    done = done_ids()
+    if workspace_id:
+        # 工作区里「学完了哪些讲」只数本工作区的记录。
+        # done_ids() 是全局的，直接用它会让新工作区继承别处的 14 讲进度。
+        done = {r["lesson_id"] for r in
+                store.lessons_done(workspace_id=workspace_id)}
+    else:
+        done = done_ids()
     vowner = vocab_owner(p)
+
+    # 工作区过滤：只留这个工作区登记过的科目。
+    allow = None
+    if workspace_id:
+        try:
+            from . import store as _st
+            con = _st.connect()
+            try:
+                rows = con.execute(
+                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
+                    (workspace_id,)).fetchall()
+                allow = {r["subject_id"] for r in rows}
+            finally:
+                con.close()
+        except Exception:
+            allow = None      # 查不到就退回「全部」，不让整页挂掉
+            allow = set() if allow is None else allow
 
     subjects = []
     for i, s in enumerate(p.get("subjects") or []):
+        if allow is not None and s.get("id") not in allow:
+            continue
         sp = subject_progress(p, s, done)
         row = {
             "id": s["id"], "name": s["name"], "kind": s.get("kind"),
@@ -843,7 +879,7 @@ def bootstrap(include_lessons=False):
     wm = wordmap_groups(p)
     bank = p.get("exercise_bank") or {}
     err = {e["part"]: e for e in store.error_by_part()}
-    answered = store.answered_qnos()
+    answered = store.answered_qnos(workspace_id=workspace_id)
     parts = []
     for pt in bank.get("parts") or []:
         e = err.get(pt["name"]) or {}
@@ -855,13 +891,39 @@ def bootstrap(include_lessons=False):
             "ok": len([q for q in qs if answered.get(q) == 1]),
         })
 
-    papers = exam_paper_meta()
+    # 卷只算本工作区科目的；工作区没挂科目时一张都不该有
+    # 本工作区的科目集合：None = 不限（全局/老界面），set = 只许这些
+    allow_subj = ({s["id"] for s in subjects} if workspace_id else None)
 
-    td = store.events_today()
+    def keep_subj(x):
+        """判断一条数据是否属于本工作区。
+
+        规则（第二版，第一版判断反了）：
+          · allow_subj is None  → 不过滤（全局视图）
+          · allow_subj 是非空集 → **必须有 subject 且在该集合里**；
+                                  没有 subject 字段 = 不知道归属 = 不放行
+          · allow_subj 为空集   → 工作区没挂科目 = 什么都不给
+
+        第一版写的是「没有 subject 就保留」，结果词书(3790词)、题库、
+        本地资料这些没有 subject 字段的整块漏了出去 —— 正是用户说的
+        「新建工作区里还有别的东西」。
+        """
+        if allow_subj is None:
+            return True
+        if not allow_subj:
+            return False
+        sub = (x or {}).get("subject") if isinstance(x, dict) else None
+        return sub in allow_subj
+
+    papers = exam_paper_meta(
+        subject_ids=([s["id"] for s in subjects] if workspace_id else None),
+        workspace_id=workspace_id)
+
+    td = store.events_today(workspace_id=workspace_id)
     proto_kpi = p.get("kpi") or {}
     lesson_total = sum(s["lessons_total"] for s in subjects)
-    mem = store.mem_stats()
-    stats = store.answer_stats()
+    mem = store.mem_stats(workspace_id=workspace_id)
+    stats = store.answer_stats(workspace_id=workspace_id)
 
     kpi = {
         "subjects": len(subjects),
@@ -870,9 +932,18 @@ def bootstrap(include_lessons=False):
         # 词表总数是「本机真有这么多词」的意思。原来这里兜底写死 3790，
         # 空库里侧栏就会显示「背单词 3790」—— 一个库里零条词、界面却有 3790 词，
         # 评委一眼就看出这个数是编的。没有就是 0，不许兜底。
-        "vocab_total": proto_kpi.get("vocab_total") or (len(p.get("vocab") or []) if isinstance(p.get("vocab"), list) else 0),
-        "mem_xuecheng": mem["words"] or proto_kpi.get("mem_xuecheng", 0),
-        "mem_top500": proto_kpi.get("mem_top500", 0),
+        # 词表总数：工作区没挂科目时必须是 0 —— 否则新工作区会显示
+        # 「3790 词」，而那些词的归属根本不属于它。
+        "vocab_total": (
+            (proto_kpi.get("vocab_total")
+             or (len(p.get("vocab") or []) if isinstance(p.get("vocab"), list) else 0))
+            if (not workspace_id or subjects) else 0
+        ),
+        # 词记忆数按工作区：没挂科目就是 0
+        "mem_xuecheng": (mem["words"] or proto_kpi.get("mem_xuecheng", 0))
+                        if (not workspace_id or subjects) else 0,
+        "mem_top500": (proto_kpi.get("mem_top500", 0)
+                       if (not workspace_id or subjects) else 0),
         "mem_source": "SQLite 事件库" if mem["words"] else "progress.json（尚无本机作答）",
         "exam_papers": len(papers),
         "answered": stats["answered"],
@@ -887,37 +958,58 @@ def bootstrap(include_lessons=False):
         "kpi": kpi,
         "subjects": subjects,
         "vocab": {
-            "current": cur,
-            "lists": (p.get("vocab") or {}).get("lists") or [],
-            "freq_index": (p.get("vocab") or {}).get("freq_index") or {},
-            "mem_counts": mem,
+            # 工作区没挂科目 → 空；挂了就只给它自己的词书
+            "current": cur if (allow_subj is None or allow_subj) else None,
+            "lists": ([x for x in ((p.get("vocab") or {}).get("lists") or [])
+                       if keep_subj(x)]
+                      if (allow_subj is None or allow_subj) else []),
+            "freq_index": ((p.get("vocab") or {}).get("freq_index") or {}
+                           if (allow_subj is None or allow_subj) else {}),
+            "mem_counts": (mem if (allow_subj is None or allow_subj) else {"words": 0, "due_today": 0, "boxes": {}}),
         },
+        # 词图：summary / lesson_index 是全局索引，没有 subject 维度，
+        # 工作区挂了科目时不下发（否则新工作区里还能看到 61 讲索引）
         "wordmap": {
-            "groups": wm,
-            "summary": (p.get("wordmap") or {}).get("summary") or {},
-            "lesson_index": (p.get("wordmap") or {}).get("lesson_index") or {},
+            "groups": [g for g in wm if keep_subj(g)],
+            "summary": ((p.get("wordmap") or {}).get("summary") or {}
+                        if allow_subj is None else
+                        ({} if not allow_subj else
+                         (p.get("wordmap") or {}).get("summary") or {})),
+            "lesson_index": ((p.get("wordmap") or {}).get("lesson_index") or {}
+                             if allow_subj is None else
+                             ({} if not allow_subj else
+                              (p.get("wordmap") or {}).get("lesson_index") or {})),
         },
-        "exercise_bank": {
-            "id": bank.get("id"), "name": bank.get("name"), "desc": bank.get("desc"),
-            "subject": bank.get("subject"), "total": bank.get("total"),
-            "n_with_answer": bank.get("n_with_answer"),
-            "n_with_explain": bank.get("n_with_explain"),
-            "parts": parts,
-        },
+        # 题库：本工作区没挂科目、或题库不属于本工作区 → 空对象
+        "exercise_bank": (
+            {
+                "id": bank.get("id"), "name": bank.get("name"), "desc": bank.get("desc"),
+                "subject": bank.get("subject"), "total": bank.get("total"),
+                "n_with_answer": bank.get("n_with_answer"),
+                "n_with_explain": bank.get("n_with_explain"),
+                "parts": parts,
+            } if keep_subj(bank) else {}
+        ),
         "exam": {"papers": papers},
         # 题源注册表：练习页读它列入口，五科共用一张表（以前只有英语语法）
-        "sources": _bootstrap_sources(),
+        "sources": [x for x in _bootstrap_sources() if keep_subj(x)],
         "point_cards": [
             {"id": c["id"], "name": c["name"], "desc": c.get("desc"),
              "subject": c.get("subject"), "kind": c.get("kind"), "count": c.get("count")}
-            for c in (p.get("point_cards") or [])
+            for c in (p.get("point_cards") or []) if keep_subj(c)
         ],
-        "resources": p.get("resources") or [],
+        # 本地资料没有 subject 字段，无法按科目归属；
+        # 工作区挂了科目时只给「本机有资料」这个事实，不给具体清单 ——
+        # 给错清单等于把别的工作区的资料混进来。
+        "resources": ((p.get("resources") or [])
+                      if allow_subj is None
+                      else ([r for r in (p.get("resources") or []) if keep_subj(r)]
+                            if False else [])),
         "events": {
             "today_count": len(td),
             "today_seconds": sum(e.get("seconds") or 0 for e in td),
-            "days7": store.last_7d_minutes(),
-            "recent": store.recent_events(12),
+            "days7": store.last_7d_minutes(workspace_id=workspace_id),
+            "recent": store.recent_events(12, workspace_id=workspace_id),
         },
         "tools_note": "所有页面数据都来自工具调用；此处只是首屏快照。",
     }

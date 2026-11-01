@@ -1,0 +1,522 @@
+/* ===== 右侧工具轨迹面板 v2 =====
+ *
+ * 第一版的问题：左边一列白字、右边一大段 JSON，像调试窗口。
+ * 这一版：左侧竖着串起来的轨迹（点用分类色），右侧按工具类型换成图形 ——
+ * 排课给时长条、搜索给卡片流、出题给题号网格、写盘给路径条。
+ */
+
+.tpanel {
+  position: relative;
+  width: 392px; flex: none;
+  display: flex; flex-direction: column;
+  height: 100%; min-height: 0;
+  background: var(--bg2);
+  border-left: 1px solid var(--line);
+  animation: tpIn .22s var(--ease);
+}
+@keyframes tpIn {
+  from { width: 0; opacity: 0; }
+  to { width: 392px; opacity: 1; }
+}
+
+/* ---------------- 顶栏 ---------------- */
+.tp-head { display: flex; align-items: center; padding: 12px 12px 8px 14px; }
+.tp-title { display: flex; align-items: center; gap: 7px; flex: 1 1 auto; min-width: 0; }
+.tp-title b { font-size: 12.5px; font-weight: 600; color: var(--tx); }
+.tp-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line2); flex: none; }
+.tp-dot.live {
+  background: var(--act);
+  box-shadow: 0 0 0 3px rgba(255, 176, 32, .16);
+  animation: tpPulse 1.2s infinite;
+}
+@keyframes tpPulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+.tp-n {
+  min-width: 17px; height: 16px; padding: 0 5px;
+  display: grid; place-items: center;
+  background: var(--line2); border-radius: 8px;
+  font-size: 10px; color: var(--tx2); flex: none;
+}
+.tp-x {
+  width: 22px; height: 22px; flex: none;
+  display: grid; place-items: center;
+  border: 0; border-radius: 5px; background: transparent;
+  color: var(--tx3); cursor: pointer;
+}
+.tp-x:hover { background: var(--card2); color: var(--tx); }
+
+/* ---------------- 分类胶囊 ---------------- */
+.tp-kinds {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+  padding: 0 14px 10px;
+}
+.tp-k {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px 2px 6px; border-radius: 6px;
+  background: rgba(255, 255, 255, .05);
+  color: var(--kc);
+  font-size: 10px; letter-spacing: .3px;
+}
+.tp-k i { width: 5px; height: 5px; border-radius: 50%; background: var(--kc); flex: none; }
+.tp-k b { font-weight: 600; opacity: .75; }
+.tp-live { font-size: 10px; color: var(--act); animation: tpBlink 1.4s infinite; }
+@keyframes tpBlink { 50% { opacity: .45; } }
+
+/* ---------------- 左右分栏 ---------------- */
+.tp-split { flex: 1 1 auto; min-height: 0; display: flex; border-top: 1px solid var(--line); }
+
+/* 左：轨迹（竖线串点） */
+.tp-rail {
+  width: 116px; flex: none;
+  overflow-y: auto;
+  padding: 10px 6px 14px 10px;
+  border-right: 1px solid var(--line);
+  scrollbar-width: none;
+  position: relative;
+}
+.tp-rail::-webkit-scrollbar { display: none; }
+.tp-rail::before {
+  content: '';
+  position: absolute;
+  left: 16px; top: 16px; bottom: 20px;
+  width: 1px;
+  background: var(--line2);
+}
+.tp-node {
+  position: relative;
+  width: 100%;
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 6px 5px 0;
+  border: 0; background: transparent;
+  color: var(--tx3);
+  font: inherit; font-size: 10.5px; text-align: left; cursor: pointer;
+  border-radius: 5px;
+  transition: color .12s var(--ease), background .12s var(--ease);
+}
+.tp-node:hover { color: var(--tx2); }
+.tp-node.on { color: var(--tx); background: var(--card2); }
+.tp-node-dot {
+  width: 7px; height: 7px; flex: none;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: var(--bg2);
+  border: 1.6px solid var(--kc);
+  box-sizing: content-box;
+  z-index: 1;
+}
+.tp-node.on .tp-node-dot { background: var(--kc); }
+.tp-node.bad .tp-node-dot { border-color: #e0604f; }
+.tp-node.run .tp-node-dot { border-color: var(--act); animation: tpPulse 1s infinite; }
+.tp-node-name {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 右：详情 */
+.tp-body {
+  flex: 1 1 auto; min-width: 0;
+  overflow-y: auto;
+  padding: 12px 13px 20px;
+  scrollbar-width: none;
+}
+.tp-body::-webkit-scrollbar { display: none; }
+
+.tp-detail { display: flex; flex-direction: column; gap: 10px; }
+.tp-dh { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.tp-dh-kind { padding: 1.5px 6px; border-radius: 4px; color: #000; font-size: 9.5px; font-weight: 600; }
+.tp-dh code { font-family: var(--fm, ui-monospace, monospace); font-size: 11px; color: var(--tx2); }
+.tp-badge { padding: 1.5px 6px; border-radius: 4px; font-size: 9.5px; margin-left: auto; }
+.tp-badge.ok { background: rgba(90, 200, 130, .13); color: #5ac882; }
+.tp-badge.bad { background: rgba(224, 96, 79, .15); color: #e0604f; }
+.tp-badge.run { background: rgba(255, 176, 32, .15); color: var(--act); }
+
+.tp-err {
+  padding: 8px 10px; border-radius: 7px;
+  background: rgba(224, 96, 79, .09);
+  border: 1px solid rgba(224, 96, 79, .26);
+  color: #e08070; font-size: 11px; line-height: 1.6;
+}
+
+/* 参数表 */
+.tp-kv { display: flex; flex-direction: column; gap: 3px; }
+.tp-kv > div {
+  display: flex; gap: 8px;
+  padding: 3px 7px; border-radius: 5px;
+  background: var(--card2);
+  font-size: 10.5px; line-height: 1.55;
+}
+.tp-kv span {
+  flex: none; min-width: 56px; max-width: 56px;
+  color: var(--tx3);
+  font-family: var(--fm, ui-monospace, monospace);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tp-kv em { flex: 1 1 auto; min-width: 0; font-style: normal; color: var(--tx2); word-break: break-all; }
+
+.viz-raw {
+  margin: 0; padding: 9px 10px;
+  background: var(--card2); border-radius: 7px;
+  font-family: var(--fm, ui-monospace, monospace);
+  font-size: 10.5px; line-height: 1.7; color: var(--tx2);
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 300px; overflow: auto;
+  scrollbar-width: none;
+}
+.viz-raw::-webkit-scrollbar { display: none; }
+
+/* ---------------- 排课：时长条 ---------------- */
+.viz-plan { display: flex; flex-direction: column; gap: 7px; }
+.viz-pl-row { display: flex; align-items: flex-start; gap: 7px; }
+.viz-pl-i { width: 14px; flex: none; padding-top: 1px; font-size: 9.5px; color: var(--tx3); }
+.viz-pl-main { flex: 1 1 auto; min-width: 0; }
+.viz-pl-top { display: flex; align-items: baseline; gap: 6px; }
+.viz-pl-top b {
+  font-size: 11.5px; color: var(--tx); font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.viz-pl-tag { flex: none; font-size: 9px; }
+.viz-pl-meta {
+  display: block; margin-top: 2px;
+  font-size: 10px; color: var(--tx3); line-height: 1.5;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.viz-pl-bar { height: 4px; margin-top: 5px; border-radius: 2px; background: var(--line2); overflow: hidden; }
+.viz-pl-bar i { display: block; height: 100%; border-radius: 2px; opacity: .85; transition: width .3s var(--ease); }
+.viz-pl-min { width: 26px; flex: none; padding-top: 1px; text-align: right; font-size: 9.5px; font-style: normal; color: var(--tx3); }
+
+/* ---------------- 搜索：卡片流 ---------------- */
+.viz-search { display: flex; flex-direction: column; gap: 5px; }
+.viz-s-n { font-size: 10px; color: var(--tx3); padding-bottom: 2px; }
+.viz-s-card { display: flex; gap: 8px; padding: 8px 9px; border-radius: 7px; background: var(--card2); }
+.viz-s-i { width: 14px; flex: none; font-size: 9.5px; color: var(--tx3); padding-top: 1px; }
+.viz-s-card b { display: block; font-size: 11.5px; font-weight: 500; color: var(--tx); line-height: 1.5; }
+.viz-s-host {
+  display: inline-block; margin-top: 2px;
+  padding: 0 5px; border-radius: 3px;
+  background: rgba(90, 200, 250, .13);
+  color: #5ac8fa; font-size: 9px; font-style: normal;
+}
+.viz-s-card p { margin: 4px 0 0; font-size: 10.5px; color: var(--tx3); line-height: 1.6; }
+
+/* ---------------- 写盘 ---------------- */
+.viz-file { display: flex; flex-direction: column; gap: 7px; }
+.viz-f-path {
+  padding: 7px 9px; border-radius: 6px;
+  background: var(--card2);
+  font-family: var(--fm, ui-monospace, monospace);
+  font-size: 10.5px; word-break: break-all;
+}
+.viz-f-dir { color: var(--tx3); }
+.viz-f-path b { color: #a06bff; }
+.viz-f-bar { height: 3px; border-radius: 2px; background: var(--line2); overflow: hidden; }
+.viz-f-bar i { display: block; height: 100%; background: linear-gradient(90deg, #a06bff, #d0aaff); }
+
+/* ---------------- 出题：题号网格 ---------------- */
+.viz-quiz { display: flex; flex-direction: column; gap: 8px; }
+.viz-q-grid { display: flex; flex-wrap: wrap; gap: 3px; }
+.viz-q-grid i {
+  width: 17px; height: 17px;
+  display: grid; place-items: center;
+  border-radius: 4px;
+  background: rgba(90, 200, 130, .13);
+  color: #5ac882; font-size: 9px; font-style: normal;
+}
+.viz-q-card { display: flex; gap: 7px; padding: 7px 9px; border-radius: 7px; background: var(--card2); }
+.viz-q-card span { width: 14px; flex: none; font-size: 9.5px; color: #5ac882; padding-top: 1px; }
+.viz-q-card p { margin: 0; font-size: 10.5px; color: var(--tx2); line-height: 1.6; }
+
+/* ---------------- 媒体网格 ---------------- */
+.viz-media { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.viz-m-cell {
+  aspect-ratio: 16 / 10;
+  border-radius: 5px;
+  background: var(--card2);
+  display: grid; place-items: center;
+  overflow: hidden;
+}
+.viz-m-ic { width: 13px; height: 13px; border-radius: 3px; border: 1.5px solid rgba(255, 122, 156, .6); }
+
+/* ---------------- 其它清单 ---------------- */
+.viz-list { display: flex; flex-direction: column; gap: 3px; }
+.viz-list > div {
+  display: flex; gap: 7px;
+  padding: 5px 8px; border-radius: 6px;
+  background: var(--card2);
+  font-size: 10.5px;
+}
+.viz-list span { width: 14px; flex: none; color: var(--tx3); font-size: 9.5px; }
+.viz-list b { font-weight: 400; color: var(--tx2); min-width: 0; }
+.viz-more { font-size: 10px; color: var(--tx3); font-style: normal; padding: 2px 4px; }
+
+.tp-none { padding: 12px; text-align: center; font-size: 10.5px; color: var(--tx3); }
+
+/* ---------------- 空态 ---------------- */
+.tp-idle {
+  flex: 1 1 auto;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px; padding: 30px; text-align: center;
+}
+.tp-idle-anim { display: flex; gap: 5px; }
+.tp-idle-anim span {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--tx3);
+  animation: tpBreath 1.4s infinite ease-in-out;
+}
+.tp-idle-anim span:nth-child(2) { animation-delay: .2s; }
+.tp-idle-anim span:nth-child(3) { animation-delay: .4s; }
+@keyframes tpBreath {
+  0%, 100% { opacity: .25; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-3px); }
+}
+.tp-idle p { margin: 0; font-size: 11.5px; color: var(--tx2); line-height: 1.7; }
+.tp-idle-kinds { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; }
+.tp-idle-kinds span { display: inline-flex; align-items: center; gap: 4px; font-size: 9.5px; color: var(--tx3); }
+.tp-idle-kinds i { width: 4px; height: 4px; border-radius: 50%; background: var(--kc); }
+
+/* ---------------- 布局配合 ---------------- */
+.dmain-wrap { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; }
+.dmain-wrap > .dmain { flex: 1 1 auto; min-width: 0; }
+.dmain-wrap:has(.tpanel) .dm-flow { padding-right: 26px; }
+.dmain-wrap:has(.tpanel) .dm-dock { padding-right: 24px; }
+
+/* ---------- 修复：内容溢出 / 被裁 ----------
+ * 实测问题：
+ *   · 排课卡片的文字和时长条超出面板右边（被裁）
+ *   · 对话区最后一条消息被输入框压住
+ */
+
+/* 1) 面板一切内容不许横向溢出 */
+.tpanel, .tp-body, .tp-detail, .viz-plan, .viz-pl-row, .viz-pl-main {
+  min-width: 0;
+  overflow-x: hidden;
+}
+.viz-pl-top b, .viz-pl-meta, .viz-s-card b, .tp-kv em {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.viz-pl-bar, .viz-f-bar { max-width: 100%; }
+
+/* 2) 详情区左右留够，别贴着边框 */
+.tp-body { padding: 12px 14px 20px 12px; }
+
+/* 3) 对话区：输入框是绝对贴底的，给消息流留出真实高度。
+ *    之前用固定 150px，实测不够（textarea 会长高）。
+ *    改用「输入框实测高度 + 间距」的方式：给 dm-dock 一个实底背景，
+ *    并让 dm-flow 的 padding-bottom 由 CSS 变量控制。 */
+.dmain.started {
+  --dockh: 132px;
+}
+.dmain.started .dm-flow {
+  padding-bottom: calc(var(--dockh) + 24px);
+}
+.dm-dock {
+  position: relative;
+  z-index: 5;
+  background: linear-gradient(to top, var(--bg) 72%, transparent);
+}
+
+/* ---------- 搜索结果卡片：第三轮修正 ----------
+ * 实测：编号和标题挤成一行（"1 最新Skills开发教程…"），8 条压在一起看不出是卡片。
+ * 改：编号单独一列、标题独立一行、加间距与左侧色条。
+ */
+.viz-search { gap: 7px; }
+.viz-s-card {
+  position: relative;
+  padding: 9px 10px 9px 24px;
+  border-radius: 8px;
+  background: var(--card2);
+  border-left: 2px solid rgba(90, 200, 250, .5);
+  transition: background .12s var(--ease);
+}
+.viz-s-card:hover { background: var(--card); }
+.viz-s-i {
+  position: absolute; left: 8px; top: 9px;
+  width: auto; padding: 0;
+  font-size: 9.5px; color: rgba(90, 200, 250, .8);
+  font-variant-numeric: tabular-nums;
+}
+.viz-s-card > div { min-width: 0; }
+.viz-s-card b {
+  display: block;
+  font-size: 11.5px; font-weight: 500;
+  color: var(--tx); line-height: 1.55;
+  /* 最多两行，超出省略 */
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+}
+.viz-s-host { margin-top: 4px; }
+.viz-s-card p {
+  margin: 4px 0 0;
+  font-size: 10.5px; color: var(--tx3); line-height: 1.65;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---------- 对话区：不要一大片空白 ----------
+ * 实测：右侧有面板时，消息只在顶部一小块，下面全空。
+ * 原因：dm-flow 有 padding-bottom 150px，加上 justify-content 把内容顶到了上面。
+ * 改：内容不满一屏时靠上，但不要留那么多空；满屏时正常滚。
+ */
+.dmain.started .dm-flow {
+  justify-content: flex-start;
+  padding-top: 22px;
+}
+/* 消息块之间稍微松一点，别贴在一起 */
+.dm-flow { gap: 14px; }
+
+/* ---------- 面板底部：别留大片黑 ---------- */
+.tp-body { padding-bottom: 28px; }
+
+/* 首屏复用 Chat 后：让 Chat 撑满 dmain 剩余宽度（之前内容缩在左边 750px）。 */
+.dmain-wrap > .chat {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  max-width: none;
+  height: 100%;
+}
+/* Chat 自带的 dock 在复用场景下也要占满 */
+.dmain-wrap > .chat .dock-in { max-width: 820px; }
+.dmain-wrap > .chat .cflow { max-width: 820px; }
+
+/* 首屏复用 Chat：让它撑满（前面那条 > 直接子选择器没命中，
+   Chat 外面还有层包装）。用后代选择器兜住。 */
+.dmain-wrap .chat {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  max-width: none !important;
+  height: 100%;
+}
+
+/* ===== 过程式可视化 =====
+ * 布局：第 1 步 → 第 2 步 → 第 3 步，每步一个节点，下面是这一步的产物。
+ * 不是罗列数据，是「先看它做了什么，再看做出来的东西」。
+ */
+
+.vz { display: flex; flex-direction: column; gap: 8px; }
+
+.vz-step { display: flex; gap: 8px; align-items: flex-start; }
+.vz-step-n {
+  width: 17px; height: 17px; flex: none;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--line2);
+  color: var(--tx2);
+  font-size: 9.5px; font-weight: 600;
+}
+.vz-step-b { flex: 1 1 auto; min-width: 0; }
+.vz-step-b b { display: block; font-size: 11.5px; color: var(--tx); font-weight: 500; line-height: 1.5; }
+.vz-step-b span { display: block; margin-top: 1px; font-size: 10px; color: var(--tx3); line-height: 1.5; }
+
+/* ---------- 搜索：视频条目（带封面） ---------- */
+.vz-vlist { display: flex; flex-direction: column; gap: 5px; margin-top: 2px; }
+.vz-v {
+  display: flex; gap: 8px; align-items: center;
+  padding: 6px 7px; border-radius: 7px;
+  background: var(--card2);
+  opacity: .62;
+  transition: opacity .15s var(--ease);
+}
+.vz-v.on { opacity: 1; background: color-mix(in srgb, var(--kc) 9%, var(--card2)); }
+.vz-v-pic {
+  width: 54px; height: 34px; flex: none;
+  border-radius: 4px;
+  background-size: cover; background-position: center;
+  background-color: #000;
+}
+.vz-v-main { flex: 1 1 auto; min-width: 0; }
+.vz-v-main b {
+  display: block; font-size: 10.5px; color: var(--tx); line-height: 1.45;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vz-v-meta { display: flex; gap: 6px; margin-top: 2px; flex-wrap: wrap; }
+.vz-v-meta span { font-size: 9px; color: var(--tx3); }
+.vz-v-meta em { font-style: normal; font-size: 9px; color: rgba(90, 200, 250, .85); }
+.vz-v-tag {
+  flex: none; padding: 1px 5px; border-radius: 3px;
+  background: var(--line2); color: var(--tx3); font-size: 9px;
+}
+.vz-v-tag.on { background: rgba(255, 176, 32, .16); color: var(--act); }
+
+/* ---------- 排课：七天 ---------- */
+.vz-days { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+.vz-day {
+  padding: 7px 8px; border-radius: 7px;
+  background: var(--card2);
+}
+.vz-day.today { background: color-mix(in srgb, var(--kc) 10%, var(--card2)); }
+.vz-day-h { display: flex; align-items: baseline; gap: 6px; }
+.vz-day-h b { font-size: 11px; color: var(--tx); font-weight: 600; }
+.vz-day-h span { font-size: 9.5px; color: var(--tx3); }
+.vz-day-h em { margin-left: auto; font-style: normal; font-size: 9.5px; color: var(--act); }
+/* 时长条：每块按分钟撑开，颜色按科目 */
+.vz-day-bar {
+  display: flex; gap: 1px;
+  height: 6px; margin: 6px 0 5px;
+  border-radius: 3px; overflow: hidden;
+  background: var(--line2);
+}
+.vz-day-bar i { display: block; opacity: .9; }
+.vz-day-l { display: flex; align-items: center; gap: 5px; padding: 1px 0; }
+.vz-day-l i { width: 5px; height: 5px; flex: none; border-radius: 50%; }
+.vz-day-l span {
+  flex: 1 1 auto; min-width: 0; font-size: 10px; color: var(--tx2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vz-day-l em { flex: none; font-style: normal; font-size: 9.5px; color: var(--tx3); }
+.vz-day-more { font-size: 9.5px; color: var(--tx3); padding-left: 10px; }
+.vz-rule {
+  margin-top: 4px; padding: 5px 7px; border-radius: 5px;
+  background: var(--card2); font-size: 9.5px; color: var(--tx3); line-height: 1.55;
+}
+
+/* 搜索：轻量清单 + 指向对话流 */
+.vz-peek { display: flex; flex-direction: column; gap: 3px; margin-top: 2px; }
+.vz-peek-r {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 4px 7px; border-radius: 5px;
+  background: var(--card2);
+}
+.vz-peek-r span { width: 12px; flex: none; font-size: 9px; color: var(--tx3); }
+.vz-peek-r b {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 10.5px; font-weight: 400; color: var(--tx2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vz-peek-r em { flex: none; font-style: normal; font-size: 9px; color: var(--tx3); }
+.vz-note {
+  margin-top: 2px; padding: 5px 7px; border-radius: 5px;
+  background: color-mix(in srgb, var(--kc) 9%, var(--card2));
+  color: var(--kc); font-size: 10px; line-height: 1.5;
+}
+
+/* 入库结果条：说「入库了几项」，不摊 JSON */
+.viz-import {
+  padding: 9px 10px;
+  border-radius: 7px;
+  background: var(--card2);
+  border-left: 2px solid #a06bff;
+}
+.viz-import-h { display: flex; align-items: center; gap: 7px; }
+.viz-import-ic {
+  width: 16px; height: 16px; flex: none;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: rgba(90, 200, 130, .16); color: #5ac882;
+}
+.viz-import-h b { font-size: 11.5px; color: var(--tx); font-weight: 500; }
+.viz-import-bad {
+  margin-left: auto; font-style: normal;
+  font-size: 9.5px; color: #e0604f;
+}
+.viz-import p {
+  margin: 6px 0 0; font-size: 10.5px; line-height: 1.6; color: var(--tx3);
+}
+.viz-file-say {
+  margin: 0; font-size: 10.5px; line-height: 1.6; color: var(--tx3);
+}

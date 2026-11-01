@@ -23,6 +23,11 @@ const P: Record<string, ReactElement> = {
   // 底部状态条：计时圈 / 用量堆叠
   clock: <><circle cx="9" cy="9" r="6.4" fill="none" /><path d="M9 5.4V9l2.7 1.6" fill="none" /></>,
   stack: <><ellipse cx="9" cy="5.2" rx="5.4" ry="2.1" fill="none" /><path d="M3.6 5.2v7.6c0 1.2 2.4 2.1 5.4 2.1s5.4-.9 5.4-2.1V5.2" fill="none" /><path d="M3.6 9c0 1.2 2.4 2.1 5.4 2.1s5.4-.9 5.4-2.1" fill="none" /></>,
+  // 工作区（左栏列表用）：文件夹。跟 courses（课程库的四宫格）分开 ——
+  // 「一个工作区」是一个容器，不是一堆东西。
+  folder: <path d="M2.5 5.2a1.7 1.7 0 0 1 1.7-1.7h2.6l1.4 1.7h5.6a1.7 1.7 0 0 1 1.7 1.7v6.9a1.7 1.7 0 0 1-1.7 1.7H4.2a1.7 1.7 0 0 1-1.7-1.7z" fill="none" />,
+  // 发送（向上箭头）。首屏输入区右下角用它，跟会话里那颗（chev 旋转）区分开。
+  up: <path d="M9 14.5V4M4.6 8.4L9 4l4.4 4.4" fill="none" />,
   chev: <path d="M6 4l5 5-5 5" fill="none" />,
   plus: <path d="M9 4v10M4 9h10" fill="none" />,
   minus: <path d="M4 9h10" fill="none" />,

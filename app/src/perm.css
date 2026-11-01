@@ -1,20 +1,80 @@
-/* 权限档开关。跟「回答要多细」并排，但语义不同：
-   一个是「答多细」，一个是「它能不能动我的东西」—— 后者是安全闸，所以配色单独走：
-   完全信任用警示色（琥珀），只看不改用灰色，先问我保持默认色。 */
+/* 权限档：安全闸。跟「推理档位」并排，但语义是「它能不能动我的东西」。
+ *
+ * 配色语义（改过一版）：
+ *   只看不改 = 灰点（抑制）
+ *   先问我   = 琥珀点（默认，正常态）
+ *   完全信任 = 红橙点 + 触发按钮描边警示色（最危险的一档，长得就该不一样）
+ * 之前那版把选中项整个涂成实心琥珀块，看着像警告条而不是开关，已去掉。
+ */
 
-.perm-b{min-width:0;text-align:center;font-size:11.5px;padding:0 9px}
-.perm-b.on{background:var(--act);color:var(--onact);font-weight:600}
-.perm-b.on.warn{background:#b4761a;color:#fff}
-.perm-b.on.dim{background:color-mix(in oklab,var(--tx3) 26%,transparent);color:var(--tx)}
+.perm-trig { position: relative; }
+.perm-trig.warn {
+  border-color: rgba(255, 122, 47, .55);
+  background: rgba(255, 122, 47, .1);
+  color: #ffb08a;
+}
+.perm-trig.warn:hover:not(:disabled) { border-color: #ff7a2f; color: #ffc4a8; }
+.perm-trig.dim { color: var(--tx3); }
 
-.perm-tip{width:296px}
-.perm-o{display:block;width:100%;text-align:left;padding:7px 9px;margin-top:5px;
-  border-radius:9px;border:1px solid var(--line);background:none;cursor:pointer;
-  color:var(--tx2);font:inherit;transition:background .12s var(--ease),border-color .12s var(--ease)}
-.perm-o:hover{background:color-mix(in oklab,var(--tx3) 8%,transparent)}
-.perm-o.on{border-color:var(--act);background:color-mix(in oklab,var(--act) 12%,transparent)}
-.perm-o i{display:block;font-style:normal;font-size:12px;color:var(--tx);font-weight:600}
-.perm-o em{display:block;font-style:normal;font-size:11px;color:var(--tx3);margin-top:2px;line-height:1.5}
-.perm-err{color:#e06a5a;font-size:11px;margin-top:6px}
-.perm-foot{margin-top:8px;padding-top:7px;border-top:1px dashed var(--line2);
-  color:var(--tx3);font-size:10.5px}
+.perm-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex: none;
+  background: var(--act);
+}
+.perm-dot.dim { background: var(--tx3); box-shadow: none; }
+.perm-dot.warn {
+  background: #ff7a2f;
+  box-shadow: 0 0 0 3px rgba(255, 122, 47, .18);
+}
+
+.perm-pop { width: 340px; }
+/* 三个选项 + 说明 + 脚注，全展开约 330px 高；视口更矮时列表内部滚，
+   脚注始终留在底部可见（alt：把脚注挤出可视区等于没写）。 */
+.perm-pop .perm-list { flex: 1 1 auto; }
+
+.perm-list {
+  display: flex; flex-direction: column; gap: 6px;
+  overflow-y: auto; min-height: 0;
+}
+
+.perm-o {
+  display: block; width: 100%; text-align: left;
+  padding: 9px 11px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--tx2); font: inherit; cursor: pointer;
+  transition: background .12s var(--ease), border-color .12s var(--ease);
+}
+.perm-o:hover { background: rgba(255, 255, 255, .03); border-color: var(--line2); }
+.perm-o.on { border-color: var(--act); background: rgba(255, 176, 32, .07); }
+.perm-o.warn.on { border-color: #ff7a2f; background: rgba(255, 122, 47, .09); }
+
+.perm-o-h { display: flex; align-items: center; gap: 8px; }
+.perm-o-h i {
+  font-style: normal; font-size: 12.5px; font-weight: 650; color: var(--tx);
+}
+.perm-o.warn .perm-o-h i { color: #ffc4a8; }
+.perm-o-on {
+  margin-left: auto;
+  font-size: 9.5px; font-weight: 600; letter-spacing: .5px;
+  padding: 1px 6px; border-radius: 999px;
+  color: var(--act); border: 1px solid rgba(255, 176, 32, .35);
+  background: rgba(255, 176, 32, .1);
+}
+.perm-o.warn .perm-o-on {
+  color: #ffb08a; border-color: rgba(255, 122, 47, .4);
+  background: rgba(255, 122, 47, .12);
+}
+.perm-o em {
+  display: block; font-style: normal;
+  font-size: 11px; color: var(--tx3);
+  margin-top: 4px; line-height: 1.55;
+}
+
+.perm-err { color: #e06a5a; font-size: 11px; margin-top: 8px; flex: none; }
+.perm-foot {
+  margin-top: 11px; padding-top: 9px;
+  border-top: 1px solid var(--line);
+  color: var(--tx3); font-size: 10.5px; line-height: 1.5;
+  flex: none;
+}

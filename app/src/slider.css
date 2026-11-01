@@ -1,0 +1,145 @@
+/* 推理等级滑条 —— 复刻 dsh-codex-effort-slider 的几何与能量层。
+ *
+ * 不用原生 <input type="range">：thumb 的尺寸/边距会被浏览器重算，
+ * 表现出来就是「白点浮在轨道外面」。这里全是普通元素，位置由内联百分比给。
+ *
+ * 几何（与参考实现一致）：
+ *   轨道高 28px；旋钮直径 28px（= 轨道高），圆完整填满管口
+ *   旋钮 top:50% + margin-top:-14px → 垂直正中
+ *   填充段左端圆角跟随轨道，只铺到旋钮圆心
+ */
+
+.cs-track {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: #2a2620;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .5);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  outline: none;
+  /* 注意：这里**不能** overflow:hidden —— 旋钮是 28px 正圆、
+     贴在 28px 高轨道里，一旦轨道裁切，滑块的上下会被削平。
+     裁切交给能量层与星尘层各自做（它们都带圆角 + overflow:hidden）。 */
+}
+.cs-track:focus-visible {
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .5), 0 0 0 2px var(--act);
+}
+.cs-track.is-off { opacity: .5; cursor: default; }
+.cs-track:active { background: #322d26; }
+
+/* 已填充段：从 0 到旋钮圆心。左端圆角，右端直角（贴着旋钮） */
+.cs-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 999px 0 0 999px;
+  background: linear-gradient(90deg, #b8791a 0%, var(--act) 70%, #ffd166 100%);
+  pointer-events: none;
+  transition: width .09s linear;
+}
+.cs-track:active .cs-fill { transition: none; }
+
+/* ===== 能量层（越往高档越「通电」）=====
+   只覆盖已填充那一段；宽度跟着旋钮圆心走，不会溢到未到达的区域。
+   用紫色：这一层表示「模型推理强度」，紫是业界惯例，
+   也与轨道的琥珀底色形成区分 —— 一眼看出「这里在烧算力」。 */
+.cs-energy {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  border-radius: 999px 0 0 999px;
+  overflow: hidden;
+  pointer-events: none;
+  background: linear-gradient(90deg, #3b1178 0%, #6d28d9 32%, #9333ea 64%, #c084fc 100%);
+  transition: opacity .2s var(--ease);
+  z-index: 1;
+}
+
+/* 扫光：一道斜向白光从左往右扫过，2.4s 一轮 */
+.cs-sweep {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 18%, rgba(255, 255, 255, .30) 50%, transparent 82%);
+  transform: translateX(100%);
+  animation: cs-sweep 2.4s linear infinite;
+}
+@keyframes cs-sweep {
+  0%   { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
+}
+
+/* 星尘：每颗从右端出生、向左穿出，亮度/大小由 --b 决定 */
+.cs-stars {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  border-radius: 999px 0 0 999px;
+  overflow: hidden;
+  pointer-events: none;
+  transition: opacity .2s var(--ease);
+  z-index: 2;
+}
+.cs-star {
+  position: absolute;
+  left: 100%;
+  width: 3px; height: 3px;
+  margin-left: -1.5px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 5px rgba(216, 180, 254, .9);
+  animation-name: cs-star-sweep;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+/* 横向位移用「自身宽度的百分比」不可行（星点是 3px），
+   所以由组件按轨道实测宽度写入 --travel（px）。回退值 340px 只在测量前用一下。 */
+@keyframes cs-star-sweep {
+  0%   { transform: translate3d(0, 0, 0); opacity: 0; }
+  8%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { transform: translate3d(calc(var(--travel, 340px) * -1), 0, 0); opacity: 0; }
+}
+
+/* 刻度点：落在轨道垂直中线，**必须能压在紫色星云上看得见**。
+   参考实现给 3px，但在我们这条 272px 宽的紫底上几乎消失，所以放大到 5px，
+   未到达的用半透明白 + 深色描边（紫底上也能分开），已到达的纯白 + 光晕。 */
+.cs-tick {
+  position: absolute;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .45);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .35);
+  pointer-events: none;
+  transition: background .12s var(--ease), box-shadow .12s var(--ease);
+  z-index: 0;                      /* 最底层：能量条盖住未到达的刻度点 */
+}
+.cs-tick.on {
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .4), 0 0 6px rgba(255, 255, 255, .85);
+}
+
+/* 旋钮：与轨道同高的正圆。
+   层级**低于**能量层与星尘（用户 2026-10-31 明确）：高档时能量条盖在旋钮上，
+   视觉上「旋钮沉进能量里」；低档没有能量层，旋钮就正常显示。 */
+.cs-knob {
+  position: absolute;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, .34), 0 0 0 .5px rgba(0, 0, 0, .06);
+  pointer-events: none;
+  transition: left .09s linear;
+  z-index: 6;              /* 最上层：能量层（1）、星尘（2）、刻度（0）都盖不住它 */
+}
+.cs-track:active .cs-knob { transition: none; }
+
+/* 系统要求减少动态：关掉扫光与粒子，能量层只留静态渐变 */
+@media (prefers-reduced-motion: reduce) {
+  .cs-sweep { display: none; }
+  .cs-star { animation: none; opacity: 0; }
+}

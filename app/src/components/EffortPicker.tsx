@@ -1,45 +1,40 @@
 import { useEffect, useRef, useState } from 'react'
 import { callTool } from '../lib/api'
-import { Icon } from './Icon'
+import { usePopover } from '../lib/usePopover'
 
-/* 回答要多细（low / medium / high）。
+/* 推理档位（reasoning effort）。
  *
- * 为什么不叫「思考强度」：实测这一家上游的 reasoning_effort 字段对思考量没有可辨影响
- * （low 6326 字 vs high 6311 字，区间重叠），真正改变回答的是提示词档位 ——
- * low 只给结论（实测 146 字），high 先逐条分析（实测 879 字）。
- * 所以按钮上写「简要 / 标准 / 详细」，跟它实际干的事对得上。
+ * 形态对齐 DeepSeek Harness：一个触发按钮 + 一个带滑杆的浮层。
+ * 档位名就是模型自己的能力刻度：Off / Minimal / Low / Medium / High / XHigh / Max，
+ * 不另造「简要/标准/详细」—— 那会让人以为在调回答长度，实际调的是推理预算。
+ *
+ * 浮层定位走 usePopover：输入框在最底部，面板天然向上长，但必须夹在视口内，
+ * 否则会像之前那样顶出屏幕（用户截图里权限面板漏了一半）。
  */
 
 type Lv = { k: string; why: string; on: boolean }
 
-const SHORT: Record<string, string> = { low: '简要', medium: '标准', high: '详细' }
+const LABEL: Record<string, string> = {
+  off: 'Off', minimal: 'Minimal', low: 'Low', medium: 'Medium',
+  high: 'High', xhigh: 'XHigh', max: 'Max',
+}
 
 export function EffortPicker({ disabled }: { disabled?: boolean }) {
   const [cur, setCur] = useState('medium')
   const [levels, setLevels] = useState<Lv[]>([])
-  const [note, setNote] = useState('')
   const [open, setOpen] = useState(false)
-  const boxRef = useRef<HTMLDivElement>(null)
+  const { anchorRef, popRef, pos } = usePopover(open, () => setOpen(false))
+  const rangeRef = useRef<HTMLInputElement>(null)
 
   async function load() {
-    const r = await callTool<{ current: string; levels: Lv[]; note?: string }>('agent_effort', {})
+    const r = await callTool<{ current: string; levels: Lv[] }>('agent_effort', {})
     if (r.ok && r.data) {
       setCur(r.data.current || 'medium')
       setLevels(r.data.levels || [])
-      setNote(r.data.note || '')
     }
   }
 
   useEffect(() => { load() }, [])
-
-  useEffect(() => {
-    if (!open) return
-    const onDoc = (e: MouseEvent) => {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
-  }, [open])
 
   async function pick(k: string) {
     if (k === cur || disabled) return
@@ -49,47 +44,72 @@ export function EffortPicker({ disabled }: { disabled?: boolean }) {
     if (r.ok && r.data) setCur(r.data.current)
   }
 
+  const keys = levels.length ? levels.map((x) => x.k) : ['low', 'medium', 'high']
+  const idx = Math.max(0, keys.indexOf(cur))
+  const pct = keys.length > 1 ? (idx / (keys.length - 1)) * 100 : 100
   const why = levels.find((x) => x.k === cur)?.why || ''
 
   return (
-    <div className="eff" ref={boxRef}>
-      {['low', 'medium', 'high'].map((k) => (
-        <button
-          key={k}
-          className={'eff-b' + (k === cur ? ' on' : '')}
-          onClick={() => pick(k)}
-          disabled={disabled}
-          title={levels.find((x) => x.k === k)?.why || ''}
-        >
-          {SHORT[k]}
-        </button>
-      ))}
+    <div className="eff">
       <button
-        className="eff-q"
+        ref={(el) => { anchorRef.current = el }}
+        className={'eff-trig' + (open ? ' on' : '')}
         onClick={() => setOpen((v) => !v)}
-        title={'回答要多细：' + (why || cur)}
-        style={{
-          width: 20, height: 22, border: 'none', background: 'none',
-          color: 'var(--tx3)', cursor: 'pointer', fontSize: 12, padding: 0,
-        }}
+        disabled={disabled}
+        title={'推理档位：' + (LABEL[cur] || cur) + (why ? ' · ' + why : '')}
       >
-        ?
+        <span className="eff-dot" aria-hidden="true" />
+        <span className="eff-cur">{LABEL[cur] || cur}</span>
+        <svg className="eff-cv" width="10" height="10" viewBox="0 0 18 18"
+          stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round">
+          <path d="M4 7l5 5 5-5" />
+        </svg>
       </button>
-      {open && (
-        <div className="eff-tip">
-          <b>回答要多细</b>
-          {levels.map((x) => (
-            <div key={x.k} style={{ marginTop: 4 }}>
-              <span style={{ color: x.on ? 'var(--act)' : 'var(--tx)' }}>
-                {SHORT[x.k] || x.k}
-              </span>
-              {' — '}
-              {x.why}
-            </div>
-          ))}
-          {note && <em>{note}</em>}
+
+      {open && pos ? (
+        <div
+          ref={popRef}
+          className={'eff-pop' + (pos.up ? ' up' : ' down')}
+          style={{ left: pos.left, top: pos.top, maxHeight: pos.maxH }}
+          role="dialog"
+          aria-label="推理等级"
+        >
+          <div className="eff-pop-h">
+            <b>推理等级</b>
+            <span className="eff-pop-v">{LABEL[cur] || cur}</span>
+          </div>
+
+          <div className="eff-track">
+            <div className="eff-fill" style={{ width: pct + '%' }} />
+            <input
+              ref={rangeRef}
+              type="range"
+              min={0}
+              max={Math.max(0, keys.length - 1)}
+              step={1}
+              value={idx}
+              disabled={disabled}
+              onChange={(e) => pick(keys[Number(e.target.value)] || cur)}
+              aria-label="推理等级"
+            />
+          </div>
+
+          <div className="eff-ticks" style={{ gridTemplateColumns: `repeat(${keys.length}, minmax(0,1fr))` }}>
+            {keys.map((k, i) => (
+              <button
+                key={k}
+                className={'eff-tick' + (i === idx ? ' on' : '')}
+                onClick={() => pick(k)}
+                title={levels.find((x) => x.k === k)?.why || LABEL[k] || k}
+              >
+                {LABEL[k] || k}
+              </button>
+            ))}
+          </div>
+
+          {why ? <div className="eff-why">{why}</div> : null}
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

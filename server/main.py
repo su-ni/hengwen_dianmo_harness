@@ -252,10 +252,26 @@ def _base_payload(full=False):
     只给 dur_total / done_n —— 真要用逐讲数据的页面走 list_lessons 工具。
     done 照旧下发：老界面 web/app.js 在读它，只占 4KB（见 datahub.bootstrap）。
     """
-    d = datahub.bootstrap(include_lessons=bool(full))
+    # 当前工作区：subjects 只给这个工作区登记过的，
+    # 否则「切到别的工作区还是那五科」—— 工作区就白分了。
+    _wid = None
+    try:
+        _wid = store.kv_get("ws.current") or None
+    except Exception:
+        _wid = None
+    d = datahub.bootstrap(include_lessons=bool(full), workspace_id=_wid)
     d["tools"] = tools.registry_public()      # 工具注册表（Agent 工具台要用）
     d["confirm_tools"] = sorted(config.CONFIRM_TOOLS)
     d["brand"] = {"title": config.APP_TITLE, "subtitle": config.APP_SUBTITLE}
+    try:
+        from . import modes as _m
+        d["mode"] = _m.state()
+    except Exception:
+        d["mode"] = None
+    try:
+        d["onboarded"] = (store.kv_get("app.onboarded") == "1")
+    except Exception:
+        d["onboarded"] = True
     # 工作区：左栏列表 + 当前那个。没有工作区时 ws=None，前端走引导。
     # 注意 ETag 口径：这段随数据变，进了指纹才是对的（建了工作区就换包）。
     try:
@@ -336,6 +352,73 @@ async def api_perm_set(request: Request):
             "error": r.get("error")}
 
 
+@app.get("/api/skills")
+async def api_skills():
+    """技能中心读它：本地 skills/ 目录下扫出来的全部技能。"""
+    from . import skills as _sk
+    return {"ok": True, "items": _sk.list_public(),
+            "dir": _sk.SKILLS_DIR, "n": len(_sk.list_public())}
+
+
+@app.get("/api/skills/{name}")
+async def api_skill_one(name: str):
+    """看一份技能的完整正文。"""
+    from . import skills as _sk
+    s = _sk.load(name)
+    if not s:
+        return {"ok": False, "error": "没有这个技能"}
+    return {"ok": True, "name": s["name"], "description": s["description"],
+            "whenToUse": s["when"], "body": s["body"]}
+
+
+@app.post("/api/onboard")
+async def api_onboard(request: Request):
+    """记下「这台机器上引导过了」。换浏览器不该再被引导一遍，
+    所以用后端 kv 而不是 localStorage。"""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    store.kv_set("app.onboarded", "1" if body.get("done") else "0")
+    return {"ok": True, "onboarded": store.kv_get("app.onboarded") == "1"}
+
+
+@app.get("/api/mode")
+async def api_mode_get():
+    """看当前模式（标准 / 计划 / 自动）。"""
+    from . import modes
+    return modes.state()
+
+
+@app.post("/api/mode")
+async def api_mode_set(request: Request):
+    """换模式。只给人用 —— 和权限档一样，模型自己调不到。"""
+    from . import modes
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    r = modes.set_mode(body.get("mode"))
+    return {**modes.state(), "ok": r.get("ok"), "error": r.get("error")}
+
+
+# ---------------------------------------------------------------- 模式闸（HTTP 层）
+def _mode_blocked():
+    """计划模式下，HTTP 写接口一律拒绝。
+
+    为什么要单独在 HTTP 层再拦一次：有些操作（新建工作区、改工作区、删工作区）
+    是直接写库的**独立路由**，不经过 tools.call，那一层的闸管不到它们。
+    """
+    try:
+        from . import modes
+        return modes.is_readonly()
+    except Exception:
+        return False
+
+
+_PLAN_MSG = ("现在是「计划」模式，只读不改。"
+             "要我动手就把模式切到「标准」或「自动」。")
+
 @app.get("/api/ws")
 def api_ws_list():
     """全部工作区 + 当前那个。左栏与首屏用它。"""
@@ -354,6 +437,8 @@ async def api_ws_create(request: Request):
     参数都可缺：name 为空就「未命名工作区」；subjects 传 [] 就是空工作区。
     **不替用户编 exam_date** —— 访谈问出来的才写，没问就是 null（排课自己兜底）。
     """
+    if _mode_blocked():
+        return {"ok": False, "error": _PLAN_MSG, "blocked": True}
     from . import workspaces as wsm
     try:
         body = await request.json()
@@ -370,6 +455,13 @@ async def api_ws_create(request: Request):
                         modules=body.get("modules"))
         if body.get("select", True):
             wsm.set_current(con, ws["id"])
+            # 会话指针也要跟着走：新建的工作区是空的，指针还指着上一个工作区的
+            # 会话的话，在里边说话会写进**旧工作区**的会话里 ——
+            # 表现就是「新建工作区了，但对话还在旧工作区」。
+            # 置空之后下一次开口会自动在这个工作区下开一条新会话。
+            rows = store.session_list(limit=1, workspace_id=ws["id"])
+            store.kv_set("agent.current_session",
+                         (rows[0]["id"] if rows else ""))
         return {"ok": True, "ws": ws}
     finally:
         con.close()
@@ -389,6 +481,8 @@ def api_ws_one(wid: str):
 @app.post("/api/ws/{wid}")
 async def api_ws_update(wid: str, request: Request):
     """改工作区：名字 / 考试日期 / 每日时长 / 模块开关 / 归档。"""
+    if _mode_blocked():
+        return {"ok": False, "error": _PLAN_MSG, "blocked": True}
     from . import workspaces as wsm
     try:
         body = await request.json()
@@ -404,6 +498,13 @@ async def api_ws_update(wid: str, request: Request):
         if "subjects" in (body or {}):
             wsm.set_subjects(con, wid, body.get("subjects") or [])
         ws = wsm.update(con, wid, **kw) if kw else wsm.one(con, wid)
+        # 归档的正好是当前工作区：立刻把当前切到另一个未归档的。
+        # 不切的话 ws.current 指着一条列表里看不到的工作区，
+        # 它名下的会话就永远显示不出来（这个坑踩过）。
+        if kw.get("archived") and (store.kv_get("ws.current") or "") == wid:
+            rest = [w for w in wsm.all_(con) if w["id"] != wid]
+            store.kv_set("ws.current", (rest[0]["id"] if rest else ""))
+            store.kv_set("agent.current_session", "")
         return {"ok": bool(ws), "ws": ws, "error": "" if ws else "没有这个工作区"}
     finally:
         con.close()
@@ -415,6 +516,13 @@ def api_ws_select(wid: str):
     con = store.connect()
     try:
         ok = wsm.set_current(con, wid)
+        if ok:
+            # 会话指针跟着工作区走：切过去之后，当前会话必须是**这个工作区**的。
+            # 不清的话，指针还指着上一个工作区的会话，history() 就把别人的对话
+            # 端点到了新工作区里（用户看到的「新工作区里还有别的内容」）。
+            rows = store.session_list(limit=1, workspace_id=wid)
+            store.kv_set("agent.current_session",
+                         (rows[0]["id"] if rows else ""))
         return {"ok": ok, "current": wsm.current(con),
                 "error": "" if ok else "没有这个工作区"}
     finally:
@@ -422,12 +530,18 @@ def api_ws_select(wid: str):
 
 
 @app.delete("/api/ws/{wid}")
-def api_ws_delete(wid: str, files: int = 0):
-    """删工作区。默认不删磁盘目录 —— 误删不可逆，文件留着能找回。"""
+def api_ws_delete(wid: str, files: int = 0, purge: int = 0):
+    if _mode_blocked():
+        return {"ok": False, "error": _PLAN_MSG, "blocked": True}
+    """删工作区。
+
+    files：是否删磁盘目录（默认不删）
+    purge：是否连业务数据一起删（默认不删，数据变「未归属」还能找回）
+    """
     from . import workspaces as wsm
     con = store.connect()
     try:
-        wsm.delete(con, wid, drop_files=bool(files))
+        wsm.delete(con, wid, drop_files=bool(files), purge=bool(purge))
         cur = wsm.current(con)
         if not cur:
             store.kv_set("ws.current", "")
@@ -701,6 +815,39 @@ async def api_agent_stream(request: Request):
                "note": r.get("note"), "ask": r.get("ask"),
                # 操作卡也必须推出去：漏了它，界面上就只剩那串 JSON
                "card": r.get("card")}
+        # 收尾两件事：给会话起名 + 给 4 条下一步建议。
+        # 放在这里而不是 turn 里：万一模型慢或失败，也**不拖累主回答** ——
+        # 主回答已经完整吐出，这两项拿不到就是空，界面不显示而已。
+        try:
+            from . import finish as _fin
+            _res, _why = _fin.finish_turn_text(text, r.get("text") or "")
+            end["suggest"] = _res.get("suggest") or []
+            _cur = str(store.kv_get(agent.KV_CUR) or "")
+            if _res.get("title") and _cur:
+                _fin.apply_title(_cur, _res["title"])
+                end["title"] = _res["title"]
+        except Exception:
+            end["suggest"] = []
+        # 计划模式下模型会写计划文档：把它带出去，界面渲染成卡片等人批准。
+        # 从这一轮的 trace 里找 plan_doc_write 的结果 —— 不另外查库，
+        # 免得把「以前写的旧方案」也翻出来挂到这一轮上。
+        try:
+            _plans = []
+            for _t in (trace or []):
+                if not isinstance(_t, dict):
+                    continue
+                if (_t.get("tool") or "") != "plan_doc_write":
+                    continue
+                _u = _t.get("ui") or {}
+                if _u.get("id"):
+                    _plans.append({"id": _u["id"], "title": _u.get("title") or "计划",
+                                   "status": _u.get("status") or "draft"})
+            if _plans:
+                end["plans"] = _plans
+        except Exception:
+            pass
+
+
         yield "data: " + json.dumps(end, ensure_ascii=False) + "\n\n"
 
     return StreamingResponse(_gen(), media_type="text/event-stream", headers={

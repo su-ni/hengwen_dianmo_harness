@@ -155,6 +155,9 @@ def t_current_lesson(subject=None, **_):
     的那一条根本不读 —— 结果就是用户点目录里别的 P，界面纹丝不动。
     pick_lesson 不是「记个笔记」，它语义上就是「我现在要学这一讲」。
     """
+    _w, _s = _ws_scope()
+    if _w and not _s:
+        return {"lesson": None, "note": "这个工作区还没挂科目"}
     sub, why = _pick_subject(subject)
     if not sub:
         return {"error": why}
@@ -199,11 +202,26 @@ def t_current_lesson(subject=None, **_):
 
 
 @tool("list_subjects", config.PERM_LOCAL, "列出全部科目与进度")
-def t_list_subjects(**_):
+def t_list_subjects(workspace_id=None, all_workspaces=False, **_):
+    wid = None if all_workspaces else _ws_or(workspace_id)
     p = datahub.proto()
     done = datahub.done_ids()
+    allow = None
+    if wid:
+        try:
+            con = store.connect()
+            try:
+                allow = {r["subject_id"] for r in con.execute(
+                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
+                    (wid,)).fetchall()}
+            finally:
+                con.close()
+        except Exception:
+            allow = set()
     out = []
     for s in p.get("subjects") or []:
+        if allow is not None and s.get("id") not in allow:
+            continue
         sp = datahub.subject_progress(p, s, done)
         out.append({"id": s["id"], "name": s["name"], "score": s.get("score"),
                     "kind": s.get("kind"), "cls": _cls(s["id"]),
@@ -219,7 +237,23 @@ def t_list_subjects(**_):
 
 
 @tool("list_lessons", config.PERM_LOCAL, "列某科目的讲次目录（按章分组）")
-def t_list_lessons(subject=None, **_):
+def t_list_lessons(subject=None, workspace_id=None,
+                   all_workspaces=False, **_):
+    wid = None if all_workspaces else _ws_or(workspace_id)
+    if wid:
+        try:
+            con = store.connect()
+            try:
+                allow = {r["subject_id"] for r in con.execute(
+                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
+                    (wid,)).fetchall()}
+            finally:
+                con.close()
+        except Exception:
+            allow = set()
+        if not allow:
+            return {"groups": [], "chapters": [], "lessons": [],
+                    "note": "这个工作区还没挂科目"}
     sub, why = _pick_subject(subject)
     if not sub:
         return {"error": why}
@@ -418,6 +452,9 @@ def sync_progress_file():
 # ========================================================== 今日编排
 @tool("plan_today", config.PERM_LOCAL, "按断点/到期/未开科目生成今日编排")
 def t_plan_today(**_):
+    wid, subs = _ws_scope()
+    if wid and not subs:
+        return {"rows": [], "say": "这个工作区还没挂科目，没东西可排"}
     p = datahub.proto()
     done = datahub.done_ids()
     rows = []
@@ -596,6 +633,9 @@ def t_plan_budget(**_):
 
 @tool("plan_week", config.PERM_LOCAL, "排未来几天每天学哪几讲（一讲看不完就分到第二天）")
 def t_plan_week(days=7, **_):
+    wid, subs = _ws_scope()
+    if wid and not subs:
+        return {"days": [], "empty": True, "empty_reason": "这个工作区还没挂科目"}
     try:
         days = int(days)
     except (TypeError, ValueError):
@@ -612,14 +652,35 @@ def t_next_task(**_):
 
 # ========================================================== 练习 / 判分
 @tool("list_item_sources", config.PERM_LOCAL, "列出可刷的题源（五科共用一张表）")
-def t_list_item_sources(subject=None, **_):
-    return {"sources": datahub.item_sources(subject),
+def t_list_item_sources(subject=None, workspace_id=None,
+                        all_workspaces=False, **_):
+    wid = None if all_workspaces else _ws_or(workspace_id)
+    allow = None
+    if wid:
+        try:
+            con = store.connect()
+            try:
+                allow = {r["subject_id"] for r in con.execute(
+                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
+                    (wid,)).fetchall()}
+            finally:
+                con.close()
+        except Exception:
+            allow = set()
+    srcs = [x for x in datahub.item_sources(subject)
+            if allow is None or x.get("subject") in allow]
+    return {"sources": srcs,
             "note": "题源自报题量与判分档；判分档不是 exact 的，要模型才能判"}
 
 
 @tool("pick_question_part", config.PERM_LOCAL, "选定题源与分组并取题（不含答案）")
 def t_pick_part(part=None, n=config.QUIZ_DEFAULT_SIZE, offset=0,
-                source=None, **kw):
+                source=None, workspace_id=None, all_workspaces=False, **kw):
+    if not all_workspaces:
+        wid, subs = _ws_scope()
+        if wid and not subs:
+            return {"questions": [], "count": 0,
+                    "say": "这个工作区还没挂科目，没有题"}
     r = datahub.source_questions(source, part, n, offset)
     if r.get("error"):
         return r
@@ -736,7 +797,13 @@ def t_list_errors(limit=20, **_):
 
 # ========================================================== 背单词
 @tool("resolve_vocab_group", config.PERM_LOCAL, "讲次 → (Unit, Lesson) 词组映射")
-def t_resolve_group(lesson_id=None, key=None, **_):
+def t_resolve_group(lesson_id=None, key=None, workspace_id=None,
+                    all_workspaces=False, **_):
+    if not all_workspaces:
+        wid, subs = _ws_scope()
+        if wid and not subs:
+            return {"key": None, "count": 0,
+                    "why": "这个工作区还没挂科目，没有词表"}
     pod = datahub.proto().get("wordmap") or {}
     idx = pod.get("lesson_index") or {}
     if key:
@@ -754,7 +821,23 @@ def t_resolve_group(lesson_id=None, key=None, **_):
 
 
 @tool("list_word_group", config.PERM_LOCAL, "取某个词组的全部词 + 记忆状态")
-def t_list_word_group(key=None, lesson_id=None, **_):
+def t_list_word_group(key=None, lesson_id=None, workspace_id=None,
+                      all_workspaces=False, **_):
+    wid = None if all_workspaces else _ws_or(workspace_id)
+    if wid:
+        try:
+            con = store.connect()
+            try:
+                allow = {r["subject_id"] for r in con.execute(
+                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
+                    (wid,)).fetchall()}
+            finally:
+                con.close()
+        except Exception:
+            allow = set()
+        if not allow:
+            return {"key": None, "count": 0, "words": [],
+                    "note": "这个工作区还没挂科目"}
     p = datahub.proto()
     if not key:
         r = t_resolve_group(lesson_id=lesson_id)
@@ -1037,14 +1120,31 @@ def t_vocab_pull(book_id=None, limit=None, force=False, name=None, **_):
 
 
 @tool("vocab_library", config.PERM_LOCAL, "本机现在有哪几本词书：课程自带的 + 拉进来的，各自有哪些组")
-def t_vocab_library(**_):
+def t_vocab_library(workspace_id=None, all_workspaces=False, **_):
     """给界面和模型一张「词表都在哪」的表 —— 不然拉进来的词书没入口，等于没拉。
 
     按**书**聚合，不按 Unit 摊（课程那本 12 个 Unit 摊出来就是 13 个入口，
     界面上根本选不动）。每本带 keys，界面按组翻。
     """
+    wid = None if all_workspaces else _ws_or(workspace_id)
     p = datahub.proto()
+    # 只给本工作区科目的词书；没挂科目 → 空
+    allow = None
+    if wid:
+        try:
+            con = store.connect()
+            try:
+                allow = {r["subject_id"] for r in con.execute(
+                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
+                    (wid,)).fetchall()}
+            finally:
+                con.close()
+        except Exception:
+            allow = set()
     books = []
+    # 工作区没挂科目 → 不给任何词书（allow 是空集时连课程词表也不给）
+    if allow is not None and not allow:
+        return {"books": [], "pulled": 0, "note": "这个工作区还没挂科目，没有词书"}
     # ① 课程自带的（学丞讲义词表）—— 跟着讲次走，整本算一本
     gs = [g for g in ((p.get("wordmap") or {}).get("groups") or []) if g.get("key")]
     if gs:
@@ -1312,36 +1412,61 @@ def t_perm_state(**_):
 
 
 @tool("stats_overview", config.PERM_LOCAL, "只展示能核对的条目数")
-def t_stats(**_):
+def t_stats(workspace_id=None, all_workspaces=False, **_):
+    wid = None if all_workspaces else _ws_or(workspace_id)
     p = datahub.proto()
+    # 科目范围：给了工作区就只算它的科目
+    allow = None
+    if wid:
+        try:
+            con = store.connect()
+            try:
+                allow = {r["subject_id"] for r in con.execute(
+                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
+                    (wid,)).fetchall()}
+            finally:
+                con.close()
+        except Exception:
+            allow = set()
+    subs_scope = [x for x in (p.get("subjects") or [])
+                  if allow is None or x.get("id") in allow]
     done = datahub.done_ids()
-    mem = store.mem_stats()
-    st = store.answer_stats()
+    if wid:
+        done = {r["lesson_id"] for r in store.lessons_done(workspace_id=wid)}
+    mem = store.mem_stats(workspace_id=wid)
+    st = store.answer_stats(workspace_id=wid)
     bank = p.get("exercise_bank") or {}
-    pods = [c for c in (p.get("point_cards") or [])]
+    pods = [c for c in (p.get("point_cards") or [])
+            if allow is None or c.get("subject") in allow]
     return {
         "lessons": {"done": len(done), "total": sum(len(s.get("lessons") or [])
-                                                     for s in p.get("subjects") or [])},
+                                                     for s in subs_scope)},
         "words": {"in_memory": mem["words"], "due_today": mem["due_today"],
                   "total": ((p.get("vocab") or {}).get("lists") or [{}])[0].get("count"),
                   "boxes": mem["boxes"]},
-        "bank": {"name": bank.get("name"), "total": bank.get("total")},
+        "bank": ({"name": bank.get("name"), "total": bank.get("total")}
+                 if (allow is None or bank.get("subject") in allow) else {}),
         "answers": st,
         # 卷数以前数 proto（15），而考场页读 list_exam_papers（16，含 papers_extra.json）——
         # 同一台机器两页两个数。这里统一走 datahub.exam_papers()（它已经合并了 extra）。
-        "exam_papers": len(datahub.exam_papers().get("papers") or []),
+        "exam_papers": len(datahub.exam_paper_meta(
+            subject_ids=([x["id"] for x in subs_scope] if wid else None),
+            workspace_id=wid)),
         # 真题可判分题数：拿题源自报的 total，别在页面上写死一个 995。
         "exam_bank_total": next((x.get("total") for x in datahub.item_sources()
                                  if x.get("id") == datahub.SRC_EXAM), 0),
         # 词量：以前只取第一本书（3790），后拉进来的 419/3287/4056 全不进计数。
         # 这里把每本都报出来，前端自己决定显示哪一本、合计多少。
-        "vocab_books": [{"name": x.get("name"), "count": x.get("count")}
-                        for x in ((p.get("vocab") or {}).get("lists") or [])],
-        "vocab_books_total": sum(int(x.get("count") or 0)
-                                 for x in ((p.get("vocab") or {}).get("lists") or [])),
+        # 词书清单：工作区没挂科目时一本都不给
+        "vocab_books": ([{"name": x.get("name"), "count": x.get("count")}
+                         for x in ((p.get("vocab") or {}).get("lists") or [])]
+                        if (allow is None or allow) else []),
+        "vocab_books_total": (sum(int(x.get("count") or 0)
+                                  for x in ((p.get("vocab") or {}).get("lists") or []))
+                              if (allow is None or allow) else 0),
         "point_cards": [{"name": c["name"], "count": c["count"]} for c in pods],
-        "days7": store.last_7d_minutes(),
-        "time": store.learning_seconds(),
+        "days7": store.last_7d_minutes(workspace_id=wid),
+        "time": store.learning_seconds(workspace_id=wid),
         "note": "全部数字来自本机数据文件与 SQLite，没有估算值",
     }
 
@@ -1588,8 +1713,21 @@ def t_paper_drop(paper_id=None, **_):
 
 
 @tool("list_exam_papers", config.PERM_LOCAL, "列出可判分真题卷与真实已答数")
-def t_exam_papers(**_):
-    ps = datahub.exam_paper_meta()
+def t_exam_papers(workspace_id=None, all_workspaces=False, **_):
+    wid = None if all_workspaces else _ws_or(workspace_id)
+    subs = None
+    if wid:
+        try:
+            con = store.connect()
+            try:
+                subs = [r["subject_id"] for r in con.execute(
+                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
+                    (wid,)).fetchall()]
+            finally:
+                con.close()
+        except Exception:
+            subs = []
+    ps = datahub.exam_paper_meta(subject_ids=subs, workspace_id=wid)
     return {"papers": ps,
             "total_questions": sum(x["total"] or 0 for x in ps),
             "answered_all": sum(x["answered"] for x in ps),
@@ -1889,6 +2027,9 @@ def t_explain_coverage(sample=None, **_):
     真题卷那 699 道「只能靠背」不是缺陷，是原卷只给了答案没给依据；
     把它们算进分母，才说明这套东西是真在核，不是在秀。
     """
+    _w, _s = _ws_scope()
+    if _w and not _s:
+        return {"total": 0, "speakable": 0, "note": "这个工作区还没挂科目"}
     import collections
     verd = collections.Counter()
     by = collections.defaultdict(collections.Counter)
@@ -3192,6 +3333,9 @@ def t_explain_stats(**_):
 
     这些数都是 explain 表里真有的行数，不是估的。
     """
+    _w, _s = _ws_scope()
+    if _w and not _s:
+        return {"total": 0, "verified": 0, "note": "这个工作区还没挂科目"}
     return store.explain_stats()
 
 
@@ -3455,13 +3599,27 @@ def t_wrong_words(limit=200, **_):
 
 
 @tool("review_today", config.PERM_LOCAL, "今天到期要复习的词：几个、都是哪些、档位与上次到期日")
-def t_review_today(limit=200, **_):
+def t_review_today(limit=200, workspace_id=None, all_workspaces=False, **_):
     """到期复习队列的取数口子。
 
     研学台自己的调度写在 config.SM2_INTERVALS（对升一档、错打回 box1）；
     「不背单词」只公开了「科学记忆算法」这四个字，公式没公开 —— 所以这里
     不给任何「跟不背单词一样」的说法，只报本机真实的到期数据。"""
-    rows = store.review_enriched(limit)
+    wid = None if all_workspaces else _ws_or(workspace_id)
+    if wid:
+        try:
+            con = store.connect()
+            try:
+                allowed = {r["subject_id"] for r in con.execute(
+                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
+                    (wid,)).fetchall()}
+            finally:
+                con.close()
+        except Exception:
+            allowed = set()
+        if not allowed:
+            return {"words": [], "count": 0, "empty_reason": "这个工作区还没挂科目"}
+    rows = store.review_enriched(limit, workspace_id=wid)
     st = store.mem_stats()
     boxes = {}
     for r in rows:
@@ -3559,7 +3717,12 @@ def t_checkin(days=70, **_):
 
 
 @tool("word_goal", config.PERM_LOCAL, "今日词量：目标多少、已过多少")
-def t_word_goal(**_):
+def t_word_goal(workspace_id=None, all_workspaces=False, **_):
+    if not all_workspaces:
+        wid, subs = _ws_scope()
+        if wid and not subs:
+            return {"goal": 0, "done": 0, "left": 0, "has_book": False,
+                    "note": "这个工作区还没挂科目"}
     done = store.today_word_count()
     # 今日目标有两种来源：自己定过的（kv plan.vocab_goal）优先，没有就用配置默认值。
     # 词书一本都没有的时候，目标不该还是 28 —— 那是给「有词书要背」的场景定的数。
@@ -4562,9 +4725,13 @@ def t_shot_timeline(lesson_id=None, **_):
 
 
 @tool("shot_list", config.PERM_LOCAL, "列截图库（可按学科 / 讲次 / 来源筛，可按关键词搜）")
-def t_shot_list(subject=None, lesson_id=None, limit=200, q=None, origin=None, **_):
+def t_shot_list(subject=None, lesson_id=None, limit=200, q=None, origin=None,
+                workspace_id=None, all_workspaces=False, **_):
+    wid = None if all_workspaces else _ws_or(workspace_id)
     rows = store.list_shots(subject=subject, lesson_id=lesson_id, limit=limit,
-                            q=q, origin=origin)
+                            q=q, origin=origin, workspace_id=wid)
+    if wid and not rows:
+        rows = []
     for r in rows:
         r["age"] = _ago(r.get("ts"))
         # 分组要用人话的讲次名。讲次 id 本身前端也有，标题前端拿不到别的讲，
@@ -4584,9 +4751,14 @@ def t_shot_list(subject=None, lesson_id=None, limit=200, q=None, origin=None, **
         lessons.append({"lesson_id": it["lesson_id"], "n": it["n"],
                         "title": (les or {}).get("title") or it["lesson_id"]})
     return {"ok": True, "shots": rows, "count": len(rows), "q": q or "",
-            "total": store.shot_count(subject), "subject": subject or "",
-            "origin": origin or "", "tags": store.all_shot_tags(subject),
-            "lessons": lessons}
+            "total": (store.shot_count(subject, workspace_id=wid)
+                      if wid else store.shot_count(subject)),
+            "subject": subject or "",
+            "origin": origin or "",
+            # tags 的契约是 [{tag, n}]，不能换成字符串数组（前端要读 .tag/.n）
+            "tags": store.all_shot_tags(subject),
+            # 分组元信息只按「本工作区真有的截图」算，rows 空时就是空
+            "lessons": (lessons if rows else [])}
 
 
 @tool("shot_del", config.PERM_LOCAL, "从截图库里摘掉一条（盘上的图不删）")
@@ -5372,8 +5544,11 @@ def t_note_rebind(map_id=None, lesson_ids=None, **_):
 
 
 @tool("note_list", config.PERM_LOCAL, "列画布（可按讲次 / 来源过滤）")
-def t_note_list(lesson_id=None, src=None, limit=100):
-    rows = store.list_canvas(lesson_id=lesson_id, src=src, limit=limit)
+def t_note_list(lesson_id=None, src=None, limit=100, workspace_id=None,
+                all_workspaces=False):
+    rows = store.list_canvas(lesson_id=lesson_id, src=src, limit=limit,
+                             workspace_id=(None if all_workspaces
+                                           else _ws_or(workspace_id)))
     now_ts = store.now()
     # 讲次标题只建一次索引，循环里逐张取（不要每行现翻 proto，那是 O(n²)）。
     # 建不起来（课程库文件坏了）就整个留空并如实说，不假装「这张没挂讲次」。
@@ -5479,6 +5654,144 @@ def t_note_from_md(text=None, title=None, **_):
     return notesrc.md_tree(text, title)
 
 
+
+# ---------------------------------------------------------------- 工作区隔离
+# 这一层是为了「不让工作区隔离靠每个工具自己记得做」。
+# 已经漏过三轮（/api/base、然后 10 个工具、后面还有 43 个），
+# 根因是「靠人记得」。改成在唯一入口统一处理。
+
+_WS_LIST_FIELDS = {
+    # 字段名 -> 判断某一条属于哪个科目的键（"subject" 就是读它自己的 subject 字段）
+    "subjects": "id",
+    "papers": "subject",
+    "sources": "subject",
+    "point_cards": "subject",
+    "groups": "subject",
+    "chapters": "subject",
+    "words": "subject",
+    "books": "subject",
+    "shots": "subject",
+    "rows": "subject",
+    "done": "subject",
+    "lessons": "subject",
+    "notes": "subject",
+    "maps": "subject",
+    "items": "subject",
+    "results": "subject",
+    # 补：体检时仍有残值的那些字段
+    "errors": "subject",
+    "recent": "subject",
+    "calls": "subject",
+    "order": "subject",
+    "parts": "subject",
+    "by_part": "subject",
+    "tags": "subject",
+    "intervals": None,       # 常量，不参与过滤
+    "confirm_tools": None,   # 程序配置，不参与过滤
+    "tools": None,
+}
+
+# 值为 None 的字段 = 明确「不按科目过滤」（常量/配置），跳过检查
+
+
+def _ws_scope():
+    """当前工作区的科目集合；None 表示不做隔离（没有工作区 / 出错）。"""
+    try:
+        wid = store.kv_get("ws.current") or None
+        if not wid:
+            return None, None
+        con = store.connect()
+        try:
+            subs = {r["subject_id"] for r in con.execute(
+                "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
+                (wid,)).fetchall()}
+        finally:
+            con.close()
+        return wid, subs
+    except Exception:
+        return None, None
+
+
+def _ws_filter(data):
+    """把一个工具的返回按工作区砍一遍。
+
+    只在「当前有工作区」时生效：没有工作区（老界面 / 全局视图）原样返回。
+    规则：
+      · 列表项有 subject 且不在本工作区 → 丢掉
+      · 列表项有 workspace_id 且 ≠ 当前 → 丢掉
+      · 没有这两个字段的条目原样保留（工具/配置类数据不该被工作区影响）
+    """
+    if not isinstance(data, dict):
+        return data
+    wid, subs = _ws_scope()
+    if not wid or subs is None:
+        return data
+    out = dict(data)
+
+    # 工作区没挂科目 → 这些列表全清空。
+    # 为什么：很多工具返回的条目没有 subject 字段（错题、词计划、作文稿…），
+    # 无法逐条判断归属。没有科目 = 没有归属 = 一律不给，
+    # 否则就是「新工作区里还能看到上一个工作区的数据」。
+    if not subs:
+        for field in _WS_LIST_FIELDS:
+            if _WS_LIST_FIELDS[field] is None:
+                continue
+            if isinstance(out.get(field), list):
+                out[field] = []
+            elif isinstance(out.get(field), dict):
+                out[field] = {}
+        return out
+    for field, key in _WS_LIST_FIELDS.items():
+        if key is None:
+            continue           # 常量/配置字段，不参与过滤
+        arr = out.get(field)
+        if not isinstance(arr, list) or not arr:
+            continue
+        kept = []
+        for it in arr:
+            if not isinstance(it, dict):
+                kept.append(it)
+                continue
+            w = it.get("workspace_id")
+            if w is not None and w != wid:
+                continue
+            sub = it.get(key) if key != "id" else None
+            if sub is None:
+                sub = it.get("subject")
+            if sub is not None and sub not in subs:
+                continue
+            kept.append(it)
+        out[field] = kept
+
+    # dict-of-list 也要过滤（比如 analyze_errors.by_part 是 {题型: [错题]}）
+    for field, v in list(out.items()):
+        if not isinstance(v, dict) or not v:
+            continue
+        newd = {}
+        for k2, v2 in v.items():
+            if isinstance(v2, list) and v2:
+                kept = [it for it in v2 if _keep_item(it, wid, subs)]
+                if kept:
+                    newd[k2] = kept
+            else:
+                newd[k2] = v2
+        out[field] = newd
+    return out
+
+
+def _keep_item(it, wid, subs):
+    """一条数据是否属于这个工作区。"""
+    if not isinstance(it, dict):
+        return True
+    w = it.get("workspace_id")
+    if w is not None and w != wid:
+        return False
+    sub = it.get("subject")
+    if sub is not None and sub not in subs:
+        return False
+    return True
+
+
 def call(name, args=None, confirmed=False, progress=None):
     """统一入口：计时、审计、兜异常。
 
@@ -5491,6 +5804,27 @@ def call(name, args=None, confirmed=False, progress=None):
         return {"ok": False, "error": "未知工具: %s" % name,
                 "tool": name, "perm": None, "ms": 0, "ts": store.now(), "data": {}}
     t0 = time.time()
+    # 模式闸：计划模式下一律只读 —— 连「先问我」都不给，直接挡。
+    # 为什么比权限档更严：计划模式的承诺就是「不动本机」，
+    # 让人再点一次「确认」等于把承诺打折。
+    try:
+        from . import modes as _modes
+        # 计划模式下**唯一放行**的写操作：写计划文档本身。
+        # 它是这个模式的产出物，挡掉它计划模式就什么都交不出来。
+        _PLAN_OK = {"plan_doc_write"}
+        if (_modes.is_readonly() and ent["perm"] == config.PERM_CONFIRM
+                and name not in _PLAN_OK):
+            ms = int((time.time() - t0) * 1000)
+            store.log_tool(name, ent["perm"],
+                           json.dumps(args or {}, ensure_ascii=False)[:400],
+                           False, ms, "计划模式：写操作被挡")
+            return {"ok": False, "blocked": True, "tool": name,
+                    "perm": ent["perm"], "ms": ms, "ts": store.now(), "data": {},
+                    "error": "现在是「计划」模式，只读不改。"
+                             "要我动手就把模式切到「标准」或「自动」。"}
+    except Exception:
+        pass
+
     # 权限档在这里生效：ask 要人点头 / auto 直接放行 / readonly 一律挡住。
     # 档位本身只能由人改（perm.set_mode 不在工具注册表里），模型拧不大自己的权限。
     _pm = perm.mode()
@@ -5511,10 +5845,28 @@ def call(name, args=None, confirmed=False, progress=None):
                 "error": "这个工具会写盘，需要你确认后才执行", "data": {}}
     try:
         _PROG.cb = progress
+        _args = dict(args or {})
+        # 自动注入当前工作区：工具签名接受 workspace_id 就补上。
+        # 调用方显式传了就不动它（给「全部视图」留口子）。
         try:
-            data = ent["fn"](**(args or {})) or {}
+            import inspect as _inspect
+            _sig = _inspect.signature(ent["fn"])
+            if "workspace_id" in _sig.parameters and "workspace_id" not in _args:
+                _w = store.kv_get("ws.current") or None
+                if _w:
+                    _args["workspace_id"] = _w
+        except Exception:
+            pass
+        try:
+            data = ent["fn"](**_args) or {}
         finally:
             _PROG.cb = None
+        # 统一按工作区砍一刀：工具自己没做过滤的，这里兜住。
+        if isinstance(data, dict) and not data.get("error"):
+            try:
+                data = _ws_filter(data)
+            except Exception:
+                pass
         ok = not data.get("error")
         # 有些工具（bili_verify、bili_search…）的业务失败写在 data["ok"]=False
         # 和 data["reason"] 里，没有 error 键 —— 原来会被包成 ok:true，
@@ -5822,7 +6174,18 @@ CATS = [
     ("对话·助手自身", "换思考强度、看聊过什么、清空对话",
      ["清空对话", "聊过什么", "思考强度", "想细一点", "快一点"],
      ["agent_turn", "agent_resume", "agent_effort", "agent_history", "agent_reset",
-      "agent_info"]),
+      "agent_info",
+      # 会话本身的操作：列/新开/切换/看过程/搜/分叉/归档/改名/删除。
+      # 以前这 9 个不在任何分类里，模型根本不知道它们存在。
+      "session_list", "session_new", "session_switch", "session_events",
+      "session_search", "session_fork", "session_archive", "session_rename",
+      "session_delete",
+      # 工作区（就是「计划」）：列/建/切/挂科目。
+      "ws_list", "ws_create", "ws_select", "ws_set_subjects",
+      # 技能：加载一份 Markdown 指令集（教模型怎么做，不是扩展能力）
+      "skill",
+      # 计划文档：计划模式下产出方案用
+      "plan_doc_write", "plan_doc_list"]),
 ]
 
 
@@ -5924,15 +6287,254 @@ def t_agent_history(limit=40, **_):
 
 
 @tool("session_list", config.PERM_LOCAL, "列出本机的会话（左侧那栏读它）")
-def t_session_list(limit=60, include_archived=False, **_):
+def t_session_list(limit=60, include_archived=False, workspace_id=None,
+                   all_workspaces=False, **_):
+    _all = bool(all_workspaces)
     # 升级上来的第一次：kv 里有旧对话、sessions 里还空 —— 先把它转成一条会话，
     # 否则界面上「有历史但没有会话」，切一下就把旧的丢在看不见的地方。
     if not str(store.kv_get(agent.KV_CUR) or "") and \
             not store.session_list(limit=1, include_archived=True):
         agent.migrate_legacy_thread()
-    rows = store.session_list(limit=int(limit or 60), include_archived=bool(include_archived))
+    # 默认只给**当前工作区**的会话：不传 workspace_id 时跟着 ws.current 走。
+    # 之前默认返回全部工作区的会话，左栏据此分组会出现「别的区的会话挂在这个区下面」。
+    # 想跨区看传 all_workspaces=True。
+    rows = store.session_list(limit=int(limit or 60),
+                              include_archived=bool(include_archived),
+                              workspace_id=(None if _all else (workspace_id or _ws_or())))
     return {"ok": True, "current": str(store.kv_get(agent.KV_CUR) or ""),
             "n": len(rows), "sessions": rows}
+
+
+def _ws_or(wid=None):
+    """工具里取工作区的统一入口：显式给了就用它，没给就用当前工作区。
+
+    为什么不让调用方自己取：几十个工具，谁忘了传就漏一片数据。
+    集中在这里，漏的可能性只剩「没调用这个函数」。
+    """
+    if wid:
+        return wid
+    try:
+        return store.kv_get("ws.current") or None
+    except Exception:
+        return None
+
+
+@tool("ws_list", config.PERM_LOCAL, "列出所有工作区（左栏那份），或看当前是哪个")
+def t_ws_list(**_):
+    from . import workspaces as wsm
+    con = store.connect()
+    try:
+        return {"ok": True, "items": wsm.all_(con), "current": wsm.current(con)}
+    finally:
+        con.close()
+
+
+@tool("ws_create", config.PERM_CONFIRM,
+      "建一个工作区（一次学习任务：专升本 / 考研 / 学摄影各一个）")
+def t_ws_create(name=None, kind="study", exam_date=None, minutes_per_day=None,
+                subjects=None, select=False, **_):
+    from . import workspaces as wsm
+    con = store.connect()
+    try:
+        ws = wsm.create(con, name, kind=kind or "study", exam_date=exam_date,
+                        minutes_per_day=minutes_per_day,
+                        subjects=subjects or [])
+        if select:
+            wsm.set_current(con, ws["id"])
+        ws["say"] = "建好了「%s」。要不要现在给它挂科目？" % ws["name"]
+        return ws
+    finally:
+        con.close()
+
+
+@tool("ws_select", config.PERM_CONFIRM, "切到另一个工作区（科目、会话、计划都跟着换）")
+def t_ws_select(wid=None, **_):
+    from . import workspaces as wsm
+    con = store.connect()
+    try:
+        if not wid:
+            return {"ok": False, "error": "要切到哪个工作区？给个 id（先用 ws_list 看）"}
+        ok = wsm.set_current(con, wid)
+        cur = wsm.current(con)
+        return {"ok": ok, "current": cur,
+                "error": "" if ok else "没有这个工作区",
+                "say": ("切到「%s」了。" % cur["name"]) if ok else ""}
+    finally:
+        con.close()
+
+
+@tool("ws_set_subjects", config.PERM_CONFIRM,
+      "给工作区挂科目（subjects 传空数组 = 挂上本机现有的全部科目）")
+def t_ws_set_subjects(wid=None, subjects=None, **_):
+    """subjects 可以是 ["math","english"]，也可以是 [{"id":"math","lessons_per_day":2}]。
+
+    传 [] 或不传时：把本机现有科目全挂上 —— 这是新工作区最常见的起步动作
+    （用户不想一个个挑）。
+    """
+    from . import workspaces as wsm
+    con = store.connect()
+    try:
+        target = wid or None
+        if not target:
+            cur = wsm.current(con)
+            target = (cur or {}).get("id")
+        if not target:
+            return {"ok": False, "error": "还没有工作区，先 ws_create"}
+        subs = subjects
+        if not subs:
+            want = [x.get("id") for x in (datahub.subjects() or []) if x.get("id")]
+            subs = want
+        ws = wsm.set_subjects(con, target, subs)
+        if not ws:
+            return {"ok": False, "error": "没有这个工作区"}
+        ids = [x["subject_id"] for x in ws.get("subjects") or []]
+        return {"ok": True, "ws": ws, "subjects": ids,
+                "say": "「%s」现在有 %d 个科目：%s"
+                       % (ws["name"], len(ids), "、".join(ids))}
+    finally:
+        con.close()
+
+
+@tool("plan_doc_write", config.PERM_CONFIRM,
+      "写一份计划文档（计划模式下用它产出方案，人点了「按这个来」才执行）")
+def t_plan_doc_write(title=None, body=None, **_):
+    """计划文档 = 一份交给人的方案，落成 Markdown 存在工作区里。
+
+    为什么它需要确认：写文档本身不改学习数据，但它代表「我要这么干」。
+    在计划模式下这是**唯一允许的写操作**（其它写盘都被挡），
+    所以必须让它能写 —— 否则计划模式什么都产出不了。
+    """
+    from . import workspaces as wsm
+    if not (body or "").strip():
+        return {"ok": False, "error": "计划正文是空的，写不出东西来"}
+    con = store.connect()
+    try:
+        cur = wsm.current(con)
+        if not cur:
+            return {"ok": False, "error": "还没有工作区"}
+        d = wsm.plan_doc_add(con, cur["id"], (title or "计划").strip(),
+                             body, status="draft")
+        return {"ok": True, **d,
+                "say": "方案写好了：「%s」。看完点「按这个来」再动手。" % d["title"],
+                "effect": "plan_doc.write"}
+    finally:
+        con.close()
+
+
+@tool("plan_doc_list", config.PERM_LOCAL, "列这个工作区下的计划文档")
+def t_plan_doc_list(**_):
+    from . import workspaces as wsm
+    con = store.connect()
+    try:
+        cur = wsm.current(con)
+        if not cur:
+            return {"ok": True, "items": []}
+        # 字段名用 docs 不用 items：items 在工具层的通用过滤清单里，
+        # 会被当成「要按科目筛的数据列表」而误清空（计划文档没有 subject）。
+        return {"ok": True, "docs": wsm.plan_docs(con, cur["id"])}
+    finally:
+        con.close()
+
+
+@tool("skill", config.PERM_LOCAL,
+      "加载一个技能的完整说明（skills/<名字>/SKILL.md）")
+def t_skill(name=None, **_):
+    """技能是「教模型怎么做」的 Markdown 指令集。
+
+    平时模型只看得到目录里的 name + description；真要用才把正文读进来。
+    这样 20 个技能也不会把上下文撑爆。
+    """
+    from . import skills as _sk
+    if not name:
+        return {"ok": True, "skills": _sk.catalog(),
+                "note": "传 name 就能拿到正文"}
+    s = _sk.load(str(name))
+    if not s:
+        return {"ok": False,
+                "error": "没有这个技能：%s" % name,
+                "available": [x["name"] for x in _sk.catalog()]}
+    if not s["user_invocable"] and not s["model_can"]:
+        return {"ok": False, "error": "这个技能没开给任何一方调用"}
+    return {"ok": True, "name": s["name"], "body": s["body"],
+            "note": "照着这份说明做。它讲的是流程，不是数据。"}
+
+
+@tool("ws_adopt_orphans", config.PERM_CONFIRM,
+      "把还没归属工作区的历史数据（作答/词/笔记/画布/截图/进度/会话）归到当前工作区")
+def t_ws_adopt_orphans(wid=None, **_):
+    """加 workspace_id 之前的数据本来不属于任何工作区。
+
+    自动回填会把归属搞错，所以做成一次显式操作 —— 用户确认后归到当前工作区。
+    """
+    from .adopt_orphans import adopt
+    r = adopt(wid)
+    if not r.get("ok"):
+        return r
+    total = sum(v for v in r["adopted"].values() if isinstance(v, int))
+    return {"ok": True, **r,
+            "say": "把 %d 条历史数据归到当前工作区了。" % total,
+            "effect": "workspace.adopt"}
+
+
+@tool("ws_export", config.PERM_LOCAL,
+      "把一个工作区打包导出（计划、会话、笔记清单，存到 data/exports/）")
+def t_ws_export(wid=None, **_):
+    """导出的内容：工作区元信息 + 科目 + 该工作区的会话列表 + 计划文档。
+
+    刻意**不打包**原始数据库与图片：那可能是几个 GB，且含隐私。
+    要的是「这次学习任务的完整记录」，不是一次整机备份。
+    """
+    import json as _json
+    import os as _os
+    import zipfile as _zip
+    from . import workspaces as wsm
+
+    con = store.connect()
+    try:
+        target = wid or None
+        if not target:
+            cur = wsm.current(con)
+            target = (cur or {}).get("id")
+        if not target:
+            return {"ok": False, "error": "还没有工作区"}
+        ws = wsm.one(con, target)
+        if not ws:
+            return {"ok": False, "error": "没有这个工作区"}
+
+        sessions = store.session_list(limit=500, workspace_id=target)
+        plans = wsm.plan_docs(con, target)
+
+        out_dir = _os.path.join(config.APP_DATA_DIR, "exports")
+        _os.makedirs(out_dir, exist_ok=True)
+        import datetime as _dt
+        name = "ws-%s-%s.zip" % (
+            (ws.get("name") or "ws").replace("/", "_")[:20],
+            _dt.datetime.now().strftime("%Y%m%d-%H%M%S"))
+        path = _os.path.join(out_dir, name)
+
+        with _zip.ZipFile(path, "w", _zip.ZIP_DEFLATED) as z:
+            z.writestr("workspace.json",
+                       _json.dumps(ws, ensure_ascii=False, indent=2))
+            z.writestr("sessions.json",
+                       _json.dumps(sessions, ensure_ascii=False, indent=2))
+            z.writestr("plans.json",
+                       _json.dumps(plans, ensure_ascii=False, indent=2))
+            md = ["# %s\n" % (ws.get("name") or "工作区")]
+            if ws.get("exam_date"):
+                md.append("- 考试日期：%s\n" % ws["exam_date"])
+            if ws.get("minutes_per_day"):
+                md.append("- 每天时长：%s 分钟\n" % ws["minutes_per_day"])
+            md.append("\n## 会话\n")
+            for x in sessions:
+                md.append("- %s（%s）\n" % (x.get("title") or "（没起名）",
+                                            (x.get("updated_at") or "")[:16]))
+            z.writestr("README.md", "".join(md))
+
+        return {"ok": True, "path": path, "name": name,
+                "sessions": len(sessions), "plans": len(plans),
+                "say": "导出好了：%s" % path}
+    finally:
+        con.close()
 
 
 @tool("session_new", config.PERM_LOCAL, "开一条新会话（换话题时用，旧的留着）")
@@ -5974,6 +6576,33 @@ def t_session_fork(sid=None, upto_turn=None, title=None, **_):
         return {"ok": False, "error": "没这条会话：%r" % (src,)}
     return {"ok": True, "id": r["id"], "from": r["from"], "events": r["events"],
             "note": "分叉好了，原来的那条没动。要切过去就调 session_switch。"}
+
+
+@tool("session_rename", config.PERM_LOCAL, "改一条会话的标题")
+def t_session_rename(sid=None, title=None, **_):
+    sid2 = str(sid or store.kv_get(agent.KV_CUR) or "")
+    if not sid2:
+        return {"ok": False, "error": "要改哪一条？给个 sid（先用 session_list 看）"}
+    row = store.session_rename(sid2, title)
+    if not row:
+        return {"ok": False, "error": "没这条会话"}
+    return {"ok": True, "id": sid2, "title": row.get("title"),
+            "say": "改好了：%s" % (row.get("title") or "（空标题）")}
+
+
+@tool("session_delete", config.PERM_CONFIRM,
+      "彻底删一条会话（连它的过程记录一起删，删了找不回来）")
+def t_session_delete(sid=None, title=None, **_):
+    """title 只是给人看确认信息的，不要求对得上 —— 拦住「删错一条」靠的是确认。"""
+    sid2 = str(sid or "")
+    if not sid2:
+        return {"ok": False, "error": "要删哪一条？给个 sid（先用 session_list 看）"}
+    r = store.session_delete(sid2)
+    if not r.get("ok"):
+        return r
+    return {"ok": True, "id": sid2, "events_deleted": r.get("events_deleted"),
+            "say": "删掉了（连带 %d 条过程记录）。" % (r.get("events_deleted") or 0),
+            "effect": "session.delete"}
 
 
 @tool("session_archive", config.PERM_LOCAL, "把一条会话归档（不删，列表里默认不显示）")

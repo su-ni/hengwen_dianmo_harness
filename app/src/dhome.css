@@ -1,0 +1,493 @@
+
+/* ============ 全局首屏（左栏 + 留白 + 输入区）============
+   尺寸口径（2026-10-31 调）：
+     左栏 280px；条目字号 14px、图标 16-17px；主标 26px。
+     之前 12.5px/13px 那套太小 —— 首屏是「门面」，字要敢放大。 */
+.dhome {
+  display: flex; height: 100%; min-height: 0;
+  background: var(--bg); color: var(--tx);
+}
+
+/* ---------------- 左栏 ---------------- */
+.drail {
+  width: 280px; flex: none; min-height: 0;
+  display: flex; flex-direction: column;
+  border-right: 1px solid var(--line);
+  background: #14110d;
+}
+.dr-head {
+  display: flex; align-items: center; gap: 9px;
+  padding: 18px 18px 14px;
+}
+
+/* 左栏品牌位的 logo：比正文图标大一档，但别压过页面主标 */
+.dr-head svg { width: 30px; height: 30px; }
+
+.dr-new {
+  display: flex; align-items: center; gap: 8px;
+  margin: 6px 14px 14px; padding: 10px 14px;
+  border: 1px solid var(--line2); border-radius: 10px;
+  background: var(--card2); color: var(--tx);
+  font: inherit; font-size: 14px; cursor: pointer;
+  transition: .14s var(--ease);
+}
+.dr-new:hover { border-color: var(--act); color: var(--act); }
+
+.dr-menu { display: flex; flex-direction: column; gap: 2px; padding: 0 10px 10px; }
+.dr-item {
+  display: flex; align-items: center; gap: 11px;
+  padding: 9px 10px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--tx2);
+  font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+  transition: .12s var(--ease);
+}
+.dr-item span { flex: 1 1 auto; min-width: 0; }
+.dr-item em {
+  font-style: normal; font-size: 11px; color: var(--tx3);
+  padding: 1px 7px; border: 1px solid var(--line2); border-radius: 999px;
+}
+.dr-item:hover:not(:disabled) { background: var(--card2); color: var(--tx); }
+.dr-item:disabled { opacity: .42; cursor: default; }
+
+.dr-sec {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 18px 6px;
+  font-size: 12px; letter-spacing: .5px; color: var(--tx3);
+}
+.dr-sec > span { flex: 1 1 auto; }
+.dr-add {
+  width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 6px; background: transparent;
+  color: var(--tx3); cursor: pointer;
+}
+.dr-add:hover { color: var(--act); background: var(--card2); }
+
+.dr-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 10px 10px; }
+.dr-ws { margin-bottom: 2px; }
+.dr-wsrow {
+  width: 100%; display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--tx2);
+  font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+  transition: .12s var(--ease);
+}
+.dr-wsrow:hover { background: var(--card2); color: var(--tx); }
+.dr-ws.on > .dr-wsrow { color: var(--tx); background: var(--card2); }
+.dr-ws.cur > .dr-wsrow { color: var(--act); }
+.dr-wsrow .nm {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dr-chev { flex: none; color: var(--tx3); transition: .15s var(--ease); }
+.dr-ws.on .dr-chev { transform: rotate(90deg); }
+
+.dr-sub { padding: 2px 10px 8px 36px; }
+.dr-meta {
+  display: flex; flex-wrap: wrap; gap: 6px 10px;
+  font-size: 12px; color: var(--tx3); margin-bottom: 7px;
+}
+.dr-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.dr-chip {
+  padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--line2); color: var(--tx2); font-size: 12px;
+}
+.dr-enter {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 11px;
+  border: 1px solid var(--line2); border-radius: 7px;
+  background: transparent; color: var(--act); font: inherit; font-size: 13px; cursor: pointer;
+}
+.dr-enter:hover { border-color: var(--act); background: rgba(255, 176, 32, .07); }
+.dr-empty { font-size: 13px; color: var(--tx3); }
+
+.dr-foot { flex: none; border-top: 1px solid var(--line); padding: 8px 10px 12px; }
+.dr-user {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px 2px; margin-top: 4px;
+}
+.dr-user .ava {
+  width: 26px; height: 26px; border-radius: 50%; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--card3); color: var(--tx2); font-size: 13px;
+}
+.dr-user b { display: block; font-size: 13.5px; font-weight: 600; }
+.dr-user em { font-style: normal; font-size: 11.5px; color: var(--tx3); }
+
+/* ---------------- 中间 ---------------- */
+/* 中间区：把「标 + 标语」和「输入框」当成一组，整体在剩余高度里居中。
+   之前 dm-mid 自己 flex:1 撑满、又 justify-content:center，会把它自己
+   居中在「扣掉输入框之后的那块」里 —— 视觉上整体偏上，用户一眼看出没居中。
+   改法：dmain 本身居中一列，mid 与 dock 都是 flex:none，谁都不抢高度。 */
+.dmain {
+  /* 定位上下文：轮次刻度轨绝对定位在右缘（不是放进滚动容器里） */
+  position: relative;
+  flex: 1 1 auto; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+  justify-content: center;      /* 这一列整体垂直居中 */
+  overflow: hidden;             /* 只能有一层滚动：由 dm-flow 负责 */
+}
+.dm-mid {
+  flex: none;                    /* 不抢高度：内容多高就多高 */
+  display: flex; flex-direction: column; align-items: center;
+  padding: 0 24px 34px; gap: 14px;   /* 与输入框拉开固定距离 */
+}
+
+
+.dm-slogan {
+  font-family: var(--fb);
+  font-size: 15px; color: var(--tx3); letter-spacing: 3px;
+}
+
+.dm-reply {
+  width: 100%; max-width: 760px; margin-top: 12px;
+  border: 1px solid var(--line2); border-radius: 12px;
+  background: var(--card2); padding: 14px 16px;
+}
+.dm-reply .who { font-size: 11.5px; color: var(--act); letter-spacing: .5px; }
+.dm-reply pre {
+  margin: 8px 0 0; white-space: pre-wrap; word-break: break-word;
+  font: inherit; font-size: 14px; line-height: 1.75;
+}
+.dm-err {
+  width: 100%; max-width: 760px; margin-top: 10px; padding: 10px 13px;
+  border: 1px solid rgba(221, 85, 85, .45); border-radius: 9px;
+  color: var(--bad, #d55); font-size: 13px;
+}
+
+/* ---------------- 输入区 ----------------
+   不自造样式：直接用会话里那套 .cbox / .cbar（见 chat.css）。
+   这里只负责把它摆在首屏该在的位置、给个宽度上限。 */
+.dm-dock {
+  flex: none; padding: 0 24px 28px;
+}
+.dm-dock .dock-in { width: 100%; max-width: 800px; margin: 0 auto; }
+@media (max-width: 900px) {
+  .dm-dock { padding: 0 12px 16px; }
+}
+
+/* ---------------- 新建工作区（只有一个输入框）---------------- */
+.dm-mask {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(0, 0, 0, .55);
+  display: flex; align-items: center; justify-content: center;
+}
+.dm-modal {
+  width: 400px; max-width: calc(100vw - 40px);
+  background: var(--card2); border: 1px solid var(--line2);
+  border-radius: 14px; padding: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+}
+.dm-mt { display: block; font-size: 15px; margin-bottom: 14px; }
+.dm-name {
+  width: 100%; box-sizing: border-box;
+  background: var(--bg); border: 1px solid var(--line2); border-radius: 9px;
+  padding: 11px 13px; color: var(--tx); font: inherit; font-size: 14px; outline: none;
+}
+.dm-name:focus { border-color: var(--act); }
+.dm-mf { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.dm-mn { margin-top: 12px; font-size: 12px; color: var(--tx3); line-height: 1.65; }
+
+/* 窄屏：左栏收窄，输入区跟着收边距 */
+@media (max-width: 900px) {
+  .drail { width: 224px; }
+  .dm-dock { padding: 0 12px 16px; }
+  .dm-mid { padding: 16px 12px 4px; }
+}
+
+/* 品牌名旁的 HARNESS 角标：对齐 DeepSeek 那种「名字 + 方框标签」的排法。
+   字要小、字距要开、边框要细 —— 它是身份标记，不是第二个标题。 */
+.dr-tag, .dm-tag {
+  display: inline-flex; align-items: center;
+  font-family: var(--f);
+  font-weight: 600; letter-spacing: 1.2px;
+  border: 1px solid rgba(255, 255, 255, .38);
+  border-radius: 5px;
+  color: var(--tx2);
+  white-space: nowrap;
+  line-height: 1;
+}
+.dr-tag { font-size: 8.5px; padding: 4px 5px 3px; }
+.dm-tag { font-size: 9.5px; padding: 5px 6px 4px; letter-spacing: 1.8px; }
+
+/* 左栏品牌行：logo + 名字 + 角标，竖排中线对齐 */
+.dr-head { display: flex; align-items: center; gap: 9px; }
+.dr-head b { font-family: var(--fb); font-size: 17px; font-weight: 700; letter-spacing: 2px; }
+
+/* 中间大标：logo + 名字 + 角标 */
+.dm-logo { display: flex; align-items: center; gap: 13px; }
+.dm-logo b { font-family: var(--fb); font-size: 36px; font-weight: 700; letter-spacing: 5px; }
+
+/* ===== 「+」与「@」的菜单 =====
+   两个都是「点开后从按钮旁边弹一张竖排菜单」，所以共用一套外观。
+   菜单向上弹（它们在输入框底部），带遮罩接住外面点击。 */
+.pluswrap { position: relative; display: inline-flex; }
+.plusbtn {
+  width: 28px; height: 28px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line2); border-radius: 8px;
+  background: transparent; color: var(--tx2); cursor: pointer;
+  transition: .14s var(--ease);
+}
+.plusbtn:hover { color: var(--act); border-color: var(--act); }
+.plusmask { position: fixed; inset: 0; z-index: 150; }
+
+.plusmenu {
+  position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 160;
+  width: 268px; padding: 7px;
+  background: var(--card); border: 1px solid var(--line2); border-radius: 12px;
+  box-shadow: 0 -12px 40px -12px rgba(0, 0, 0, .9);
+  animation: effIn .13s var(--ease);
+}
+.plusmenu.atmenu { width: 244px; }
+.pm-g {
+  font-size: 10.5px; letter-spacing: .6px; color: var(--tx3);
+  padding: 7px 9px 5px;
+}
+.plusmenu button {
+  width: 100%; display: grid;
+  grid-template-columns: 18px 1fr;
+  grid-template-areas: "ic nm" ". em";
+  align-items: center; gap: 2px 9px;
+  padding: 7px 9px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--tx2);
+  font: inherit; text-align: left; cursor: pointer;
+  transition: background .12s var(--ease), color .12s var(--ease);
+}
+.plusmenu button:hover { background: var(--card2); color: var(--tx); }
+.plusmenu button svg { grid-area: ic; color: var(--tx3); }
+.plusmenu button span { grid-area: nm; font-size: 12.5px; }
+.plusmenu button em {
+  grid-area: em; font-style: normal; font-size: 10.5px; color: var(--tx3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* cbar 里两个按钮之间别挤 */
+.cbar .pluswrap + .eff { margin-left: 2px; }
+
+/* ===== @ 引用 / 指令 面板 =====
+   定位在输入框上方（anchor 由组件给），宽 300，最高 320 内部滚。
+   跟 plusmenu 同一套语言：深底、细边、分组标题、行内 hint 右对齐。 */
+.sm-pop {
+  position: absolute; z-index: 170;
+  width: 316px; max-width: calc(100vw - 40px);
+  background: var(--card); border: 1px solid var(--line2); border-radius: 12px;
+  box-shadow: 0 -12px 40px -12px rgba(0, 0, 0, .9);
+  overflow: hidden;
+  animation: effIn .12s var(--ease);
+}
+.sm-h {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 9px 12px 7px; border-bottom: 1px solid var(--line);
+}
+.sm-h b { font-size: 11px; letter-spacing: .6px; color: var(--tx2); }
+.sm-h em {
+  font-style: normal; font-size: 10.5px; color: var(--tx3);
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sm-list { max-height: 300px; overflow-y: auto; padding: 6px; scrollbar-width: thin; }
+.sm-i {
+  width: 100%; display: flex; align-items: center; gap: 10px;
+  padding: 8px 9px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--tx2); font: inherit;
+  text-align: left; cursor: pointer;
+  transition: background .1s var(--ease), color .1s var(--ease);
+}
+.sm-i:hover, .sm-i.on { background: var(--card2); color: var(--tx); }
+.sm-k { font-size: 12.5px; flex: none; }
+.sm-i.on .sm-k { color: var(--act); font-weight: 600; }
+.sm-d {
+  flex: 1 1 auto; min-width: 0; text-align: right;
+  font-size: 10.5px; color: var(--tx3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ===== 轮次导航轨（turn rail）=====
+   贴在对话区右缘的竖排刻度：每根短线 = 一轮，悬停出预览，点击跳过去。
+   参考 DSH 的 turn-rail：宽 28，右边距 12，垂直居中，最高 420。 */
+.rail-turn {
+  /* 贴在整个对话区的右缘（dmain 是定位上下文）。
+     用 top:0 + bottom:0 撑满，内部再垂直居中 ——
+     只写 top:50% 会相对内容盒算，内容一高就跑到视口外（实测 -328px）。 */
+  position: absolute; right: 8px; top: 0; bottom: 0;
+  width: 24px; contain: layout;
+  z-index: 6;
+  display: flex; align-items: center; justify-content: flex-end;
+}
+/* 内部那层才是真正的轨道（高度由它自己定，不撑满） */
+.rail-turn::before { content: ''; }
+.rt-item {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  width: 28px; height: 10px; display: flex; align-items: center; justify-content: flex-end;
+  cursor: pointer; padding-right: 4px;
+}
+.rt-dot {
+  display: block; width: 12px; height: 2px; border-radius: 1px;
+  background: rgba(255, 255, 255, .22);
+  transition: width .12s var(--ease), background .12s var(--ease);
+}
+.rt-item:hover .rt-dot, .rt-item.hov .rt-dot { width: 18px; background: rgba(255, 255, 255, .55); }
+.rt-item.on .rt-dot { width: 18px; background: var(--act); }
+
+.rt-pop {
+  position: absolute; right: 24px; top: 50%; transform: translateY(-50%);
+  width: 220px; padding: 8px 10px;
+  background: var(--card); border: 1px solid var(--line2); border-radius: 9px;
+  box-shadow: 0 8px 28px -10px rgba(0, 0, 0, .9);
+  pointer-events: none;
+}
+.rt-pop b { display: block; font-size: 10.5px; color: var(--act); margin-bottom: 3px; }
+.rt-pop span {
+  display: block; font-size: 11.5px; line-height: 1.5; color: var(--tx2);
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+/* 首屏右侧直接放 Chat 组件：它自己是一个 flex 列（head / body / dock），
+   所以这里别再给 padding 或 justify-content，交给它自己的空态逻辑。 */
+.dmain-chat { padding: 0; justify-content: stretch; }
+.dmain-chat > .chat { height: 100%; }
+
+/* ===== 全屏圆形扩散转场 =====
+   结构见 lib/reveal.ts：透明层 + 一个实心圆，圆从角落长到覆盖全屏。
+   圆盖到一半时换 DOM，所以看到的是「新界面从角上长出来」，
+   不是「先黑一下再出现」。 */
+.reveal-layer { contain: strict; }
+
+/* ===== 最近会话（左栏）=====
+   新会话按钮开出来的那条、以及以前聊过的都在这里；点一下切回去。 */
+.dr-sess { padding: 0 10px 8px; display: flex; flex-direction: column; gap: 1px; }
+.dr-srow2 {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  padding: 6px 9px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--tx2);
+  font: inherit; font-size: 12.5px; text-align: left; cursor: pointer;
+  transition: .12s var(--ease);
+}
+.dr-srow2:hover { background: var(--card2); color: var(--tx); }
+.dr-srow2.on { background: rgba(255, 176, 32, .09); color: var(--act); }
+.dr-srow2 .nm {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dr-srow2 em {
+  font-style: normal; font-size: 10px; color: var(--tx3); flex: none;
+}
+
+/* ===== 进入工作区（重做）=====
+ * 旧版：一颗琥珀描边的小按钮，混在会话列表下面，看着突兀、也点不准。
+ * 新版：整行宽、无边框、低对比的文字入口，右侧一枚细箭头；
+ *       悬停时才微微亮起 —— 它是「展开这个文件夹」的自然延续，
+ *       不是一颗抢眼的 CTA（那是给「新建」用的）。 */
+.dr-enter2 {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+  margin: 8px 0 2px;
+  padding: 7px 10px 7px 12px;
+  border: 0; border-radius: 8px;
+  background: transparent;
+  color: var(--tx3);
+  font: inherit; font-size: 12.5px;
+  cursor: pointer;
+  transition: background .12s var(--ease), color .12s var(--ease);
+}
+.dr-enter2:hover {
+  background: var(--card2);
+  color: var(--tx);
+}
+.dr-enter2:hover svg { color: var(--act); transform: translateX(2px); }
+.dr-enter2 svg { color: var(--tx3); transition: transform .15s var(--ease), color .15s var(--ease); }
+
+/* 展开区整体收紧：会话列表 + 进入按钮，别再有那种「信息块」的松散感 */
+.dr-sub { padding: 2px 8px 8px 26px; }
+
+/* 刻度轨内部那层：真正的轨道，高度按轮次数算，在右缘垂直居中 */
+.rt-rail {
+  position: relative; width: 24px;
+}
+
+/* ===== 新会话插入时的动画（治「抽搐」）=====
+ * 抽搐的成因：新行插到列表顶部，下面所有行瞬间下移一格 ——
+ * 帧率上看着就是「抖一下」。
+ * 做法：只让新插进来的那一行淡入+微滑，其余行用 transition 平滑移动，
+ * 而不是瞬间重排。
+ */
+.dr-sess { will-change: contents; }
+.dr-srow2 {
+  animation: none;
+  transition: background .12s var(--ease), color .12s var(--ease), transform .18s var(--ease);
+}
+/* 新插入的行（打上 .fresh 类）才有入场动画，老行不动 */
+.dr-srow2.fresh {
+  animation: srowIn .22s var(--ease);
+}
+@keyframes srowIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+/* 对话区：切会话时不要整块重排（它是 flex 列，内容高度变化会抖） */
+.cflow { contain: layout; }
+
+/* ===== 新手引导（第一次打开时的一层）=====
+ * 三步、一张卡、居中。做得像「一页说明」，不是弹窗广告：
+ * 没有大插图、没有闪动、没有强制下一步才能关。
+ */
+.obwrap {
+  position: fixed; inset: 0; z-index: 9998;
+  display: grid; place-items: center;
+  background: rgba(6, 5, 4, .82);
+  backdrop-filter: blur(3px);
+  animation: obIn .22s var(--ease);
+}
+@keyframes obIn { from { opacity: 0; } to { opacity: 1; } }
+
+.obcard {
+  width: min(440px, calc(100vw - 40px));
+  background: var(--card);
+  border: 1px solid var(--line2);
+  border-radius: 16px;
+  box-shadow: 0 24px 70px -18px rgba(0, 0, 0, .95);
+  overflow: hidden;
+}
+
+.obhead {
+  display: flex; align-items: center; gap: 8px;
+  padding: 14px 16px 10px;
+}
+.obhead b { font-size: 13px; color: var(--tx); font-weight: 600; }
+.obstep {
+  margin-left: 4px; padding: 1px 7px; border-radius: 8px;
+  background: var(--line2); color: var(--tx3); font-size: 10px;
+}
+.obskip {
+  margin-left: auto; padding: 3px 8px;
+  border: 0; border-radius: 5px; background: transparent;
+  color: var(--tx3); font: inherit; font-size: 11.5px; cursor: pointer;
+}
+.obskip:hover { background: var(--card2); color: var(--tx); }
+
+.obbody { padding: 6px 22px 18px; }
+.obic {
+  width: 46px; height: 46px; border-radius: 12px;
+  display: grid; place-items: center;
+  background: rgba(255, 176, 32, .1); color: var(--act);
+  margin-bottom: 14px;
+}
+.obbody h3 {
+  margin: 0 0 8px; font-size: 16px; color: var(--tx); font-weight: 600;
+}
+.obbody p {
+  margin: 0; font-size: 13px; line-height: 1.85; color: var(--tx2);
+}
+
+.obfoot {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line2);
+  background: var(--bg2);
+}
+.obdots { display: flex; gap: 5px; }
+.obdots i {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--line2);
+  transition: background .15s var(--ease);
+}
+.obdots i.on { background: var(--act); }
