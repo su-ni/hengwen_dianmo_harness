@@ -1,0 +1,164 @@
+/* ===== 气泡（第 7 章 D18–D22）=====
+ * 设计取向：**它是一片贴在页面角上的光，不是一块面板。**
+ *   · 收起时无底色、无边框、无阴影
+ *   · 只有 6px 的点 + 11px 的字
+ *   · 需要你答才「长」出内容，长出来的就是同一张提问卡
+ */
+
+.bubwrap {
+  position: fixed;
+  right: 18px;
+  top: 58px;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
+  pointer-events: none;
+  max-width: min(360px, calc(100vw - 36px));
+}
+
+.bub {
+  pointer-events: auto;
+  border-radius: 8px;
+  background: transparent;
+  transition: background .16s var(--ease), box-shadow .16s var(--ease);
+}
+.bub.open {
+  border-radius: 10px;
+  background: rgba(18, 17, 15, .96);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 30px -14px rgba(0, 0, 0, .95),
+              inset 0 0 0 1px rgba(255, 255, 255, .045);
+}
+
+.bub-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px 5px 9px;
+  border: 0;
+  border-radius: 999px;
+  /* 极轻的底：不加会「飘」在页面上下不来，加太重就变面板。
+     0.045 是实测的临界值 —— 能托住字，又看不出边界。 */
+  background: rgba(255, 255, 255, .045);
+  color: rgba(240, 238, 232, .82);
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.3;
+  cursor: pointer;
+  transition: color .16s var(--ease), background .16s var(--ease);
+  white-space: nowrap;
+}
+.bub-line:hover {
+  color: rgba(240, 238, 232, .92);
+  background: rgba(255, 255, 255, .05);
+}
+.bub.open .bub-line { color: var(--tx); background: transparent; }
+
+.bub-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: rgba(240, 238, 232, .35);
+}
+.bub.ask .bub-dot { background: #5ac8fa; box-shadow: 0 0 8px rgba(90, 200, 250, .7); }
+.bub.done .bub-dot { background: #5ac882; }
+.bub.error .bub-dot { background: #e0604f; box-shadow: 0 0 8px rgba(224, 96, 79, .6); }
+.bub.running .bub-dot {
+  background: #ffb020;
+  box-shadow: 0 0 10px rgba(255, 176, 32, .8);
+  animation: bubBreath 1.8s ease-in-out infinite;
+}
+@keyframes bubBreath {
+  0%, 100% { opacity: .4; transform: scale(.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+.bub-txt { font-variant-numeric: tabular-nums; letter-spacing: .2px; }
+.bub-txt em {
+  margin-left: 5px;
+  font-style: normal;
+  color: rgba(240, 238, 232, .45);
+}
+.bub.ask .bub-txt { color: #9fdcff; }
+.bub.ask .bub-line { background: rgba(90, 200, 250, .09); }
+.bub.open .bub-txt em { color: var(--tx3); }
+.bub-cv { opacity: .35; margin-left: 2px; }
+
+.bub-body {
+  padding: 2px 10px 9px;
+  animation: bubGrow .18s var(--ease);
+  transform-origin: top right;
+}
+@keyframes bubGrow {
+  from { opacity: 0; transform: translateY(-3px) scale(.98); }
+  to { opacity: 1; transform: none; }
+}
+
+.bub-title {
+  padding: 2px 0 6px;
+  font-size: 11.5px;
+  color: var(--tx2);
+  line-height: 1.5;
+  border-bottom: 1px solid rgba(255, 255, 255, .05);
+  margin-bottom: 7px;
+}
+
+/* 提问卡进气泡：去掉它的外框，只留内容 */
+.bub-askbox .cask {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+}
+.bub-askbox .cask-q { font-size: 11.5px; }
+.bub-askbox .cask-opt { font-size: 11px; padding: 4px 8px; }
+.bub-askbox .cask-in { font-size: 11px; padding: 5px 8px; }
+.bub-askbox .cask-ft { padding-top: 6px; }
+.bub-askbox .cask-opts { max-height: 180px; overflow-y: auto; scrollbar-width: none; }
+.bub-askbox .cask-opts::-webkit-scrollbar { display: none; }
+
+.bub-plainask p {
+  margin: 0 0 7px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--tx);
+}
+
+.bub-prog {
+  font-size: 10.5px;
+  color: var(--tx3);
+  font-family: var(--fm, ui-monospace, monospace);
+  padding: 2px 0 4px;
+}
+
+.bub-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, .05);
+  margin-top: 7px;
+}
+.bub-go {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--act);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.bub-go:hover { text-decoration: underline; }
+.bub-x2 {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--tx3);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.bub-x2:hover { color: var(--tx); }
