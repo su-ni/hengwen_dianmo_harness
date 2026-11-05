@@ -117,6 +117,38 @@ const STAR_PRESET: Params = {
   depthDim: 0.28, depthBlur: 1.6, bokeh: 4, bokehBright: 0.3, ringWidth: 1.05,
 }
 
+
+/* ---------- 参数元信息：给调参面板用 ----------
+   每个参数给一个合理范围和分组。范围不是随便定的：
+   · 倍数类（bright/speed/width）0..3，0 是关掉、1 是原样、3 是拉满；
+   · 数量类（count/bokeh）按官方调过的量级给上限；
+   · 0..1 的开关类（dim/blur/vignette）保持 0..2。
+   面板只改 C，不重建引擎 —— 重建会把正在跑的光束全部掐掉。 */
+export type ParamMeta = { key: string; label: string; group: string; min: number; max: number; step: number }
+export const PARAM_GROUPS: { name: string; keys: string[] }[] = [
+  { name: '节拍与运镜', keys: ['tempo', 'camera', 'camZoom', 'glow', 'scan', 'vignette', 'atmos'] },
+  { name: '环与数据块', keys: ['ringSpeed', 'ringPause', 'ringWidth', 'rimBright', 'rimWidth', 'rimDensity', 'dataFlicker', 'ringShadow'] },
+  { name: '网与流光', keys: ['webBright', 'webPulseBase', 'webPulseAmp', 'webSpin', 'webBlur', 'runnerCount', 'runnerBright', 'runnerWidth', 'runnerSpeed', 'runnerVariety'] },
+  { name: '彗星与光束', keys: ['cometPerBeat', 'cometBurst', 'cometTrickle', 'cometLines', 'cometWidth', 'cometBright', 'cometGlow', 'cometSpeed', 'cometFollow', 'beamBright', 'beamBounce', 'beamLen', 'beamWidth', 'beamGlow', 'dashBright'] },
+  { name: '雾与飞线', keys: ['hazeCount', 'hazeBright', 'flyerCount', 'flyerBright', 'flyerWidth', 'flyerSpeed', 'burstRate', 'burstSize', 'burstBright', 'flareRate', 'flareBright', 'bokeh', 'bokehBright'] },
+  { name: '景深', keys: ['depthBlur', 'depthDim', 'parallax'] },
+]
+
+const _RANGE: Record<string, [number, number, number]> = {
+  tempo: [0.2, 4, 0.05], camera: [0, 2, 0.05], camZoom: [0, 1.2, 0.02],
+  runnerCount: [0, 1200, 20], hazeCount: [0, 40, 1], flyerCount: [0, 6, 0.05],
+  bokeh: [0, 40, 1], ringPause: [0.2, 5, 0.1], cometPerBeat: [0, 6, 0.1],
+  cometBurst: [0, 20, 1], cometTrickle: [0, 5, 0.1], burstRate: [0, 8, 0.1],
+  flareRate: [0, 8, 0.1], webPulseBase: [0, 0.5, 0.01], webPulseAmp: [0, 2, 0.05],
+  vignette: [0, 2, 0.05], depthDim: [0, 2, 0.05], ringShadow: [0, 2, 0.05],
+}
+export const PARAM_META: ParamMeta[] = PARAM_GROUPS.flatMap(g =>
+  g.keys.map(k => {
+    const [min, max, step] = _RANGE[k] || [0, 3, 0.05]
+    return { key: k, label: k, group: g.name, min, max, step }
+  })
+)
+
 export const PRESETS = { mine: { ...BASE, ...BAKED }, live: { ...BASE, ...LIVE_PRESET }, star: { ...BASE, ...STAR_PRESET } }
 
 /* ---------- 数据源 ---------- */
@@ -169,6 +201,13 @@ export class HaloEngine {
   readonly pal: Palette
   C: Params
   mode: EngineMode = 'live'
+
+  /* 环上数据块原来全是 rnd() 拼的假数字（官方同口径：格式真实、数值示意）。
+     这里允许外部注入**真实数**：记忆条数、工具数、掌握度、今日投入…
+     facts 为空时自动退回随机，页面没数据时不至于报错。 */
+  facts: Record<string, number> = {}
+  private factKeys: string[] = []
+  private factIx = 0
 
   private stage: HTMLCanvasElement
   private S: CanvasRenderingContext2D
@@ -650,6 +689,19 @@ export class HaloEngine {
   }
 
   private fmtNum() {
+    /* 有真实数就轮着用真实数 —— 环上的字不再是凭空编的。
+       轮着用而不是总取第一个：一块数据格里要填好几个数，
+       全填同一个会看起来像卡住了。 */
+    if (this.factKeys.length) {
+      const k = this.factKeys[this.factIx % this.factKeys.length]
+      this.factIx++
+      const v = this.facts[k]
+      return typeof v === 'number' && Number.isFinite(v) ? String(v) : this._rndNum()
+    }
+    return this._rndNum()
+  }
+
+  private _rndNum() {
     const k = rnd()
     return k < 0.3 ? rr(0, 1).toFixed(3)
       : k < 0.55 ? (rr(1, 9).toFixed(1) + 'e-' + (2 + ((rnd() * 5) | 0)))
@@ -676,7 +728,11 @@ export class HaloEngine {
   private header(c: CanvasRenderingContext2D, x0: number, x1: number, y: number, t: RGB) {
     c.font = '700 4.3px ' + FONT
     c.fillStyle = this.pal.rgba(t, 0.95); c.fillText(pick(this.HEAD), x0, y)
-    c.fillStyle = this.pal.rgba(t, 0.55); c.fillText(String((rnd() * 99) | 0).padStart(2, '0'), x1 - 6, y)
+    /* 右上角那个两位编号：有真实 key 就显示 key 缩写，没有才用随机数 */
+    const tag = this.factKeys.length
+      ? this.factKeys[(this.factIx - 1 + this.factKeys.length) % this.factKeys.length].slice(0, 2).toUpperCase()
+      : String((rnd() * 99) | 0).padStart(2, '0')
+    c.fillStyle = this.pal.rgba(t, 0.55); c.fillText(tag, x1 - 6, y)
     c.fillStyle = this.pal.rgba(t, 0.3); c.fillRect(x0, y + 5.6, x1 - x0, 0.45)
     return y + 7.5
   }
@@ -1496,6 +1552,33 @@ export class HaloEngine {
     for (let i = 0; i < this.C.runnerCount; i++) this.runners.push(this.newRunner(true))
     if (this.ready) this.resize()
   }
+
+  /* 调参面板用：单改一个参数，不重建引擎。
+     runnerCount 这类数量参数要同步增减流光，否则滑块拖了没反应。 */
+  setParam(key: string, v: number) {
+    if (!(key in this.C)) return
+    const old = this.C[key]
+    this.C[key] = v
+    if (key === 'runnerCount') {
+      const n = Math.max(0, Math.round(v))
+      while (this.runners.length < n) this.runners.push(this.newRunner(true))
+      if (this.runners.length > n) this.runners.length = n
+    }
+  }
+
+  /* 把当前参数吐出来给面板显示（面板要知道「现在是多少」） */
+  getParams(): Params { return { ...this.C } }
+
+  /* 注入真实数字：环上数据块会轮着显示这些值，不再是 rnd() 编的。
+     传 {} 就退回纯装饰模式（比如还没拉到数据的头几帧）。 */
+  setFacts(f: Record<string, number>) {
+    this.facts = { ...f }
+    this.factKeys = Object.keys(this.facts).filter(k => Number.isFinite(this.facts[k]))
+    this.factIx = 0
+  }
+
+  /* 回到当前模式的预设 —— 调乱了要能一键复原 */
+  resetParams() { this.setPreset(this.mode === 'star' ? 'star' : 'live') }
 
   setMode(m: EngineMode) {
     if (this.mode === m) return
