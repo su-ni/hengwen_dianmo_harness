@@ -27,6 +27,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 from . import config, store
+from . import silent as _silent
 
 NET_TIMEOUT = 20
 MAX_BYTES = 4 * 1024 * 1024        # 单个文件 / 响应体的上限，防止手滑点到大文件
@@ -94,8 +95,8 @@ def list_indexed():
                     out[k[len("notesrc_"):]] = {}
         finally:
             con.close()
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     return out
 
 # 每个来源要填什么、去哪填。前端照着显示，不用猜。
@@ -659,8 +660,8 @@ def list_file_src(src, q=None, with_path=False, since_ts=None, limit=None):
     if limit:
         try:
             files = files[:int(limit)]
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
     for f in files:
         p = f.pop("path", None)          # 默认不把绝对路径吐给前端
         if p:
@@ -690,8 +691,8 @@ def pull_file_src(src, item_id, title=None):
         if not os.path.abspath(target).startswith(base_abs + os.sep) and \
            os.path.abspath(target) != base_abs:
             return {"ok": False, "error": u"这个条目不在你填的文件夹里"}
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     if not os.path.isfile(target):
         return {"ok": False, "error": u"找不到这个文件：%s" % item_id}
     text, why = _read_text(target)

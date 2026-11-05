@@ -16,6 +16,7 @@ import json
 import re
 
 from . import bili, config, datahub, model_router, planner, store
+from . import silent as _silent
 
 KV = "intake.state"
 
@@ -107,8 +108,8 @@ def _ai_listen(text, pp):
         try:
             dt.date.fromisoformat(d)
             out["date"] = d
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
     ym = (data.get("date_ym") or "").strip() if isinstance(data.get("date_ym"), str) else ""
     if not out.get("date") and re.match(r"^\d{4}-\d{2}$", ym):
         out["date_ym"] = ym
@@ -146,8 +147,8 @@ def _listen(s):
             pp["date"] = (_nxt - dt.timedelta(days=1)).isoformat()
             pp["date_assumed"] = True
             pp["date_from"] = pp["date_ym"]
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
     pp["ai"] = {"used": bool(patch), "why": aiwhy,
                 "provider": (model_router.current() if patch else None),
                 "model": (model_router.model_of() if patch else None)}
@@ -188,8 +189,8 @@ def _scan(s):
     srcs = []
     try:
         srcs = datahub.item_sources()
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     ex = (p.get("exam") or {}).get("papers") or []
     voc = (p.get("vocab") or {}).get("lists") or []
     s["inventory"] = {
@@ -229,8 +230,8 @@ def _subjects_of(s):
         for x in (datahub.proto().get("subjects") or []):
             if (x.get("score") or 0) > 0 and x.get("name"):
                 out.append(x["name"])
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     if out:
         return out, False
     # 空白实例：本机没有考纲。专升本公共课四门是公开考纲里的，
@@ -412,8 +413,8 @@ def _verify_one(s, st, todo, c):
     try:
         from . import tools as _t
         _t.tick(st["log"][-1], n=done_n + 1, total=len(todo))
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     return c
 
 
@@ -441,8 +442,8 @@ def _draft(s):
         for x in (datahub.proto().get("subjects") or []):
             for l in (x.get("lessons") or []):
                 local_hours += (l.get("dur") or 0) / 3600.0
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     pick_hours = sum((c.get("hours") or 0) for c in (s.get("candidates") or [])
                      if c.get("bvid") in (s.get("picked") or []))
     all_pick_hours = sum((c.get("hours") or 0) for c in (s.get("candidates") or []))
@@ -581,8 +582,8 @@ def _advance(s, upto=None):
             from . import tools as _t
             _t.tick("第 %d/%d 站 · %s —— %s" % (i + 1, len(order), STAGES[i][1], STAGES[i][2]),
                     n=i + 1, total=len(order))
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
         try:
             _RUN[key](s)
         except Exception as e:

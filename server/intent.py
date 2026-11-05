@@ -16,6 +16,7 @@ import datetime as dt
 import re
 
 from . import config, datahub, planner, store
+from . import silent as _silent
 
 
 # ---------------------------------------------------------------- 本机身份
@@ -221,8 +222,8 @@ def parse(text, today=None):
                 if nm:
                     mine_names.append(nm)
                     mine_names.extend([x for x in re.split(r"[与和暨、\s/]+", nm) if len(x) >= 2])
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
         mine_names = sorted(set(mine_names), key=len, reverse=True)
         have_word = next((h for h in mine_names if h in low), None)
 

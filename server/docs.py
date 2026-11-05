@@ -12,6 +12,7 @@ import io
 import os
 import re
 import zipfile
+from . import silent as _silent
 
 # 纯文本：不用解析，按行读就行（fsops 自己处理）
 TEXT_EXT = {
@@ -106,8 +107,8 @@ def _pptx(path):
             nf = slide.notes_slide.notes_text_frame
             if nf and (nf.text or "").strip():
                 buf.append("[备注] " + nf.text.strip())
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
         if buf:
             out.append("—— 第 %d 页 ——" % i)
             out.extend(buf)
@@ -266,8 +267,8 @@ def _rtf(path, max_bytes=8 * 1024 * 1024):
     # 字节层：latin-1 铺开的字符按 gbk 收回去（中文 RTF 基本是这个码页）
     try:
         s = s.encode("latin-1", "ignore").decode("gbk", "ignore")
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     s = re.sub(r"\x01(\d+)\x02", lambda m: uni[int(m.group(1))], s)   # 换回 Unicode 字
     s = re.sub(r"[ \t]{2,}", " ", s)
     return re.sub(r"\n{3,}", "\n\n", s).strip()

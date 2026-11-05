@@ -23,6 +23,7 @@ import threading
 import time
 
 from . import config, docs
+from . import silent as _silent
 
 ROOT = config.APP_DIR            # 相对路径的基准：研学台/
 LIMIT = config.PROJECT_ROOT      # 项目根（相对路径用 ../ 能上到这里）
@@ -291,8 +292,8 @@ def _backup(full, daily=False):
         for p in olds[:-BACKUP_KEEP]:
             try:
                 os.remove(p)
-            except OSError:
-                pass
+            except OSError as _e:
+                _silent.log_squash(__name__, _e)
         return _rel(dst) if dst.startswith(ROOT) else dst
     except Exception:
         return None
@@ -414,8 +415,8 @@ def sql(query, params=None, db="data/study.db", limit=200, write=False):
         try:
             if con is not None:
                 con.close()
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
         return {"ok": False, "error": "SQLite 说：%s" % e}
 
 

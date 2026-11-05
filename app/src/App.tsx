@@ -3,6 +3,7 @@ import { loadBase, type Base } from './lib/api'
 import { revealTransition } from './lib/reveal'
 import { Shell, type PageKey } from './components/Shell'
 import { SearchModal } from './components/SearchModal'
+import { Bubbles, useBubbles } from './components/Bubbles'
 import { CourseHome } from './pages/CourseHome'
 import { Skel } from './components/V6'
 
@@ -32,6 +33,7 @@ const LazySearch = lazy(() => import('./pages/Search').then((m) => ({ default: m
    index → 点工作区 → 进 home（原课程主页）及以下各页。 */
 const LazyIndex = lazy(() => import('./pages/Home').then((m) => ({ default: m.Home })))
 const LazySkills = lazy(() => import('./pages/Skills').then((m) => ({ default: m.Skills })))
+const LazyHaloflux = lazy(() => import('./pages/Haloflux').then((m) => ({ default: m.Haloflux })))
 
 const KEY = 'sd_page'
 const SID_KEY = 'sd_sid'
@@ -39,7 +41,7 @@ const SID_KEY = 'sd_sid'
    名单里没有的页会被当场弹回去（新增页面忘了加，表现就是「点了没反应」）。
    加 PageKey 的时候必须同步这里。 */
 const PAGES: PageKey[] = ['index', 'home', 'today', 'classroom', 'courses', 'schedule', 'vocab',
-  'skills',
+  'skills', 'haloflux',
   'practice', 'notes', 'notesAll', 'exam', 'stats', 'writing', 'agent', 'canvas', 'shots',
   'search']
 
@@ -297,10 +299,32 @@ export function App() {
       </div>
     )
   }
+  /* 气泡：挂在最外层，首屏和任何工作区页都能看见（D18 跨工作区）。
+     状态来自后端，所以切页/切工作区都不丢。 */
+  const bub = useBubbles()
+
   if (!base) return <div style={{ padding: 40 }} className="muted">正在读本机数据…</div>
 
   return (
     <>
+    {/* 右上角气泡：**只在非聊天页出现**。
+        首屏（index）和会话页（home）本身就是 AI 聊天的地方 ——
+        在那里它已经在回答你、在等你了，再弹一个气泡就是重复打扰。
+        只有在课程 / 单词 / 真题这些「你正在干别的事」的页面上，
+        气泡才有存在意义：让你知道另一头还在跑、或者有事等你答。 */}
+    {/* haloflux 也不弹气泡：它自己就是一整屏「现在在跑什么」，
+        再叠一个右上角小卡片，位置还正好压在舞台切换按钮上。
+        这一页的气泡信息由页面内的「在跑」KPI 和左下角流水面板承担。 */}
+    {(page !== 'index' && page !== 'home' && page !== 'haloflux') ? (
+      <Bubbles
+        items={bub.items}
+        onRefresh={bub.pull}
+        onJump={(b) => {
+          if (b.session_id) setSid(b.session_id)
+          setPage('home')
+        }}
+      />
+    ) : null}
     {srchOpen ? (
       <SearchModal
         onClose={() => setSrchOpen(false)}
@@ -310,7 +334,16 @@ export function App() {
     {/* 全局首屏不吃壳：它本身就是「第一层」（工作区列表 + 一个框）。
         套上左栏图标条会变成「两级壳套在一起」——左栏那 13 个图标在没有工作区时
         一个都点不出内容。 */}
-    {page === 'index' ? (
+    {/* haloflux 也不吃壳 —— 跟官方 lab.html 一样是**整屏**的控制台：
+       顶部一条 KPI 带、中间一块舞台、底部一排面板，三行铺满整个窗口。
+       套在 Shell 里就变成「页面里的一个页面」：左栏 56px + 顶栏 48px 白占掉，
+       下面还被内容区限高，环永远铺不满 —— 用户一眼就看出来不对。
+       退出靠左上角那个「返回」（页面自己画），不是靠系统导航。 */}
+    {page === 'haloflux' ? (
+      <Suspense fallback={<div style={{ padding: 40 }} className="muted">正在载入光环…</div>}>
+        <LazyHaloflux onExit={() => revealTransition(() => setPage('index'))} />
+      </Suspense>
+    ) : page === 'index' ? (
       <Suspense fallback={<div style={{ padding: 40 }} className="muted">正在读本机数据…</div>}>
         <LazyIndex base={base} onOpen={openWs} onGo={(p: any) => setPage(p)} />
       </Suspense>

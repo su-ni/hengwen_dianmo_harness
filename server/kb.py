@@ -28,6 +28,7 @@ import threading
 import time
 
 from . import config, store
+from . import silent as _silent
 
 MODEL_NAME = "BAAI/bge-small-zh-v1.5"
 DIM_HINT = 512
@@ -82,8 +83,8 @@ def _open():
     con.row_factory = _sq.Row
     try:
         con.execute("PRAGMA journal_mode=WAL")
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     return con
 
 
@@ -313,8 +314,8 @@ def index_canvas(map_id, title=None, tree=None, lesson_id=None):
 
     try:
         _flatten(tree or {}, 0)
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     txt = " / ".join(x.strip() for x in buf if x.strip())[:900]
     if not txt:
         txt = str(title or "").strip()
@@ -545,8 +546,8 @@ def collect(subjects=None):
             out.append({"source": "grammar780", "ref": str(q.get("no")),
                         "subject": "english", "kind": "语法题",
                         "title": _clean(stem, 34), "text": _clean(t, 1200)})
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
 
     # 2) 考点卡（计算机 603 + 政治 613）
     try:
@@ -580,8 +581,8 @@ def collect(subjects=None):
                 out.append({"source": cid, "ref": ref, "subject": sub,
                             "kind": "考点", "title": _clean(it.get("q") or t, 34),
                             "text": _clean(t, 1200)})
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
 
     # 3) AI 生成的题（用户明确要求：这些不是一次性产物，要能被找回来）
     try:
@@ -600,8 +601,8 @@ def collect(subjects=None):
                 out.append({"source": sid, "ref": str(it.get("no")), "subject": sub,
                             "kind": "AI 生成题", "title": _clean(stem, 34),
                             "text": _clean(t, 1200)})
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
 
     # 4) 真题卷题目 + 阅读原文（原文单独成条：讲解要「引第几段第几句」时靠它定位）
     try:
@@ -627,8 +628,8 @@ def collect(subjects=None):
                     out.append({"source": "paper", "ref": "%s#g%s-%s" % (pid, gi, q.get("no")),
                                 "subject": sub, "kind": "真题",
                                 "title": _clean(stem, 34), "text": _clean(t, 1200)})
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
 
     # 5) 讲次标题（"这个知识点在哪一讲"，比题更常被问）
     try:
@@ -642,8 +643,8 @@ def collect(subjects=None):
                             "subject": sid, "kind": "讲次",
                             "title": _clean(name, 34),
                             "text": _clean("%s %s" % (name, les.get("desc") or ""), 300)})
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
 
     # 6) 自己的笔记：最该被搜到却最容易被忘的一块
     try:
@@ -656,14 +657,14 @@ def collect(subjects=None):
             les = ""
             try:
                 les = (datahub.find_lesson(datahub.proto(), r["lesson_id"]) or {}).get("name") or ""
-            except Exception:
-                pass
+            except Exception as _e:
+                _silent.log_squash(__name__, _e)
             out.append({"source": "note", "ref": str(r["lesson_id"]),
                         "subject": (str(r["lesson_id"]).split("-")[0] or None),
                         "kind": "笔记", "title": _clean(txt, 34),
                         "text": _clean(("%s %s" % (les, txt)), 800)})
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
 
     # 7) 画布（XMind 式的知识图）：把整棵树摊成一段文字再编
     try:
@@ -684,8 +685,8 @@ def collect(subjects=None):
             buf = []
             try:
                 _flatten(json.loads(r["tree"] or "{}"), buf)
-            except Exception:
-                pass
+            except Exception as _e:
+                _silent.log_squash(__name__, _e)
             txt = " / ".join(x.strip() for x in buf if x.strip())[:900]
             if not txt:
                 txt = r["title"] or ""
@@ -695,8 +696,8 @@ def collect(subjects=None):
                         "subject": (str(r["lesson_id"] or r["id"]).split("-")[0] or None),
                         "kind": "画布", "title": _clean(r["title"] or txt, 34),
                         "text": _clean(txt, 900)})
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
 
     # 8) 词书（7846 条）。单独标成「单词」，默认不混进语义检索 ——
     #    找词本来就有专门工具（搜中文释义 / 词详情 / 词书列表），7846 条词
@@ -715,8 +716,8 @@ def collect(subjects=None):
                             "kind": "单词", "title": "%s %s" % (word, cn[:16]),
                             "text": _clean("%s %s %s %s" % (word, w.get("ph") or "",
                                                             w.get("pos") or "", cn), 200)})
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     return out
 
 

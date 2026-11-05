@@ -23,6 +23,7 @@ import sqlite3
 import time
 
 from . import config
+from . import silent as _silent
 
 # 工作区模块：勾了才在左栏与页面里出现。模块不认识时按「开」处理，
 # 别因为前端加了新模块名就把老工作区锁死。
@@ -133,8 +134,8 @@ def init(con):
     if scols and "workspace_id" not in scols:
         try:
             con.execute("ALTER TABLE sessions ADD COLUMN workspace_id TEXT")
-        except sqlite3.Error:
-            pass
+        except sqlite3.Error as _e:
+            _silent.log_squash(__name__, _e)
     migrate(con)
 
 
@@ -232,8 +233,8 @@ def create(con, name, kind="study", exam_date=None, minutes_per_day=None,
         os.makedirs(os.path.join(ws_dir(wid), "plans"), exist_ok=True)
         os.makedirs(os.path.join(ws_dir(wid), "modules"), exist_ok=True)
         os.makedirs(os.path.join(ws_dir(wid), "uploads"), exist_ok=True)
-    except OSError:
-        pass
+    except OSError as _e:
+        _silent.log_squash(__name__, _e)
     con.commit()
     return one(con, wid)
 
@@ -281,8 +282,8 @@ def delete(con, wid, drop_files=False, purge=False):
         try:
             con.execute("DELETE FROM session_events WHERE session_id NOT IN"
                         " (SELECT id FROM sessions)")
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
 
     con.execute("DELETE FROM workspace_subs WHERE workspace_id=?", (wid,))
     con.execute("DELETE FROM modules WHERE workspace_id=?", (wid,))
@@ -293,8 +294,8 @@ def delete(con, wid, drop_files=False, purge=False):
         import shutil
         try:
             shutil.rmtree(ws_dir(wid))
-        except OSError:
-            pass
+        except OSError as _e:
+            _silent.log_squash(__name__, _e)
     return True
 
 
@@ -369,8 +370,8 @@ def migrate(con):
         from . import store
         store.kv_set("ws.migrated_from_plan_json", _now())
         store.kv_set("ws.current", ws["id"])
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     return ws
 
 

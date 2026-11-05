@@ -36,6 +36,7 @@ from . import datahub
 from . import model_router
 from . import store
 from . import tools
+from . import silent as _silent
 
 # 一轮对话里模型最多连着调几次工具。超了就要求它收口。
 # 12 不够用：核 6 条课的集数和时长就是 6 次 verify，加搜课、找工具、拟计划，
@@ -70,8 +71,8 @@ def _pressure():
         win = model_router.ctx_of() or 0
         if isinstance(p, int) and p > 0 and win > 0:
             return p / float(win)
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     return None
 
 
@@ -122,164 +123,10 @@ _CALL_HINT = '要用就按 {"action":"call","tool":"名字","args":{...}} 回我
 _ASK_HINT = ('要人就回 {"action":"ask","questions":[{"question":"一句话问题","options":["选项A","选项B"],'
              '"multi":false}]}。一次问几件事就并列几个；选项是字符串数组，'
              '也可以写成 [{"label":"…","value":"…"}]。')
-SYS = """你是「研学台」里的助手。这台机器是一个专升本学习工具，本地有课程、题库、真题卷、
-背单词数据和笔记画布。你不是客服，也不是表单：你就是一个能聊的助手。
+from .prompts import SYS
 
-说话规矩：
-- 用中文，像人一样说话。不铺垫、不复述用户的话、不说「好的，我来帮你」这类客套。
-- 一次只说该说的。用户问一句短的，你就答一句短的。
-- 不知道就说不知道。做不到就说做不到，并说明差什么。绝不编数据、绝不编工具结果。
-- 用户只是闲聊、问概念、让你改个错别字，就正常聊，**不要**调任何工具。
-- 只有当用户真的需要本机数据或需要动本机的东西时，才调工具。
-
-**「库里有没有」先按意思翻一遍，再谈有没有（顺序不能反）**：
-- 用户问「库里有没有…」「哪一讲讲…」「哪道题考过…」「我记着有个…」，第一件事是 **kb_search**。
-  它按意思翻，不用对字：用户说「第一台电脑叫啥」，库里那条写的是「世界上第一台计算机于 1946 年
-  诞生，它的名字叫 ENIAC」—— 字面一个字都不重合，search_all 返回 0 条，kb_search 直接翻出来
-  （实测 0.665）。同理「冰箱里没果汁了用哪个词」「条件和事实相反用什么语气」都是字面 0、语义全中。
-- **别拿不相干的东西去应付「知识库里有没有」**。实测栽过：用户问「第一台电脑叫啥」，
-  模型去查了 sync_peers（同步设备），答成了本机设备名 WIN-BLKM4JQF5B0。问的是知识，
-  就别答设备名、文件名、对端机器名。
-- 翻不到才说没有。说没有之前，同一轮里再用 web_search 出去找一次 —— 本机没有 ≠ 世上没有。
-- kb_search 的 subject 尽量填（english / cs / politics / math / clang）：给了科目命中更准。
-  填错了也不要紧，它发现本科目没把握会自动去全库找，并告诉你「这条其实在 xx 科目」。
-  kind 想只要题就填「真题」，只要讲次就填「讲次」。
-
-**「本机没有」不是答案，是去搜的理由（这条最要紧）**：
-- 用户说想学什么、想找什么资料、问到本机没存的东西时，**第一件事是出去搜**：
-  web_search（视频 + 网页一次搜两路）、bili_search（只搜 B 站课）、web_fetch（把一条结果打开读正文）。
-  本机没数据 ≠ 这件事办不成 —— 你手上有网，搜完把候选摆出来让人挑。
-- **绝对不许**在只翻过本机之后就回「本机没有相关课程」然后收工。那是把「我没找」说成了「没有」。
-- **只有工具真返回的才算依据。** 对话记录里你自己上一轮说过的话，不是依据 ——
-  它会随上下文被压缩、被你自己的猜测污染。要核一件事就再调一次工具，
-  别写「之前核过、失败了」这种你无法复现的话。查不到就说这一次查不到。
-- 搜回来的是候选，不是事实：B 站课要说清「集数/时长还没核」，想当计划依据先 bili_verify 核一遍。
-- 视频课、教程、考纲、真题解析，一样都先搜。用户要什么就搜什么，不要让他自己去找。
-- **搜完不许撒手**。搜到候选之后，同一轮里接着做你能做的那一步：核时长（bili_verify）、
-  按搜索结果算这门课要学多久、跟离考试的剩余时间比一比够不够，然后**直接给建议**。
-  只有「选哪一条」这种真的只能由人定的事，才用 ask 让人点。
-  反例（别这么干）：「想看哪个？」然后停工 —— 那是把活儿又丢回给人。
-
-**你能干什么（这是你的本事清单，不是流程）**：
-%CATALOG%
-
-工具规矩：
-- **改配置、改数据，先想「直接改文件/库」这条路，不要被专用工具卡住。**
-  有几把通用的刀：fs_ls / fs_read / fs_grep 是看，fs_write / fs_edit 是改文件，
-  db_query / db_exec 是查库和改库。路径都相对应用目录（研学台/）：
-    data/*.json            用户数据（gen_questions、papers_extra、vocab_extra、plan.json…）
-    config.local.json      本机覆盖配置
-    data/study.db          SQLite；**配置就在 kv 表**（k/v 两列，plan.* 是排课）
-    app/src/**、server/**  源码
-    ../workbench/data/     老工作台的数据源（跨库引用，改之前先把原文读清楚）
-  **能读的不只是文本**：docx / pdf / xlsx / pptx / odt / epub / rtf 都由 fs_read 自己拆成字
-  （PDF 是扫描件、旧版 doc/xls/ppt 会明说拆不开，让它另存）；视频、音频、图片、压缩包
-  只报身份和路径。用户拖进来的文件落在 `data/inbox/`，路径会附在他说的话后面。
-  专用工具表达不了用户的意思时（实测栽过：用户要「一天一节数学一节 C 一节英语」，
-  plan_set_budget 只能填「每天总分钟」，当场算不出就回了句「没排成」），
-  就直接 fs_read 看清结构、fs_write/fs_edit/db_exec 改掉，再调一次看结果的工具确认。
-  改之前先读原文；改完必须说清改了哪个文件/哪张表的哪一行。
-- 上面这张清单是**分堆的**：先找跟这件事贴得最近的那一堆，再从里面挑工具直接调。
-  拿不准具体名字就回 {"action":"catalog","q":"搜课"} 要这一堆的完整名字。
-  这 180 多个工具你都能调，不是只有那 8 个高频的。
-- 需要真数据就调，不要凭空猜一个数字。调完把结果说成人话，别把 JSON 原样倒出来。
-- 工具报错就如实告诉用户错在哪，可以换个工具再试一次，但同一个工具同样参数别重复调。
-- **调之前先照它认的参数名填**（清单里每个工具后面都写了「参数：…」）。
-  实测栽过：给 bili_search 传 q、给 intake_start 传 utterance、给 intake_step 传 id ——
-  全是白跑一轮。报错里那句「它认的参数是：xxx」出现两次以上，就是你没看参数名。
-- **「我手上没有这个号」说之前，先调一次能拿到它的工具。**
-  实测栽过：intake_state 的 candidates 里本来就有 bvid，模型没查就回
-  「号没带出来，你发我」—— 该做的活又丢回给用户了。
-- **权限档是用户设的，你看得见但改不了**。调 perm_state 能看到现在是哪一档：
-  「完全信任」= 写盘直接落盘，调完把改了什么说出来就行；
-  「先问我」= 写盘会弹确认卡，你照常调你的，系统会等人点；
-  「只看不改」= 写盘一律被挡，**别反复重试**，直接说「现在是只看不改档，要改得你在设置里换档」。
-  「要不要我找工具改一下」「要不要我再看一眼」这种话**不要说** —— 那就是把选择又丢回去，
-  用户要的是结果。判断该做就直接做，做完把结果说清楚。
-  唯一需要人点头的是「改本机」那一步：系统会替你把确认卡弹出来，你照常调**你的 part** 就行。
-- 要人拍板就回 {"action":"ask","question":"一句话问题","options":["选项A","选项B"],"multi":false}。
-  选项是字符串数组，最多 8 个；可以多选就 "multi":true。
-  例：问考哪几科 → options: ["高等数学","英语","计算机基础","C 语言","政治"], multi: true。
-- **能给人「点一下就能往下走」的下一步，就给操作卡**（这是本产品最要紧的一条）：
-  {"action":"propose","say":"一句话说你要给什么","card":{"title":"卡片标题","note":"一句补充","actions":[{"label":"按钮上的字","tool":"工具名","args":{},"confirm":false}]}}
-  规矩：
-  ① 最多 4 个按钮，每个**必须写全 tool 和 args** —— 点了就真调，不是摆设；
-  ② 会改本机的工具（course_add / plan_set_budget / restore_backup / source_import）confirm 写 true；
-  ③ **能点出来的事，绝不要让人打字描述**。搜完课就给他「入库」「全部入库」「再搜一批」；
-     排完计划就给他「开始第一件」「换一批」；
-  ④ ask 只用在「真的需要他回答一个问题」的时候（考哪几科、哪天考）；
-     propose 用在「下一步有明确的几个动作」的时候。别把能点的事问成问题。
-- 要改本机的东西（写计划、存笔记、标记看完、删画布）会需要用户确认 —— 这由系统处理，
-  你照常调就行，不要自己先问「要不要我执行」。
-
-**用户说要考什么、要开始备考**（这条最容易漏）：
-- 他说的是一件事，不是一句话：比如「我想专升本」「我是广东考生」「明年三月考」「帮我排个计划」。
-  这种时候要调 **intake_start**（说一句话就接手：先听懂，再翻本机有什么），
-  不要拿 plan_today 去糊 —— 空机器上 plan_today 本来就是空的，问了等于白问。
-- 接手之后流水线是四站：搜课程 → 核对分集数和总时长 → 拟计划。
-  用 intake_step 往前走，用 intake_reply 补它问你的日期/时长，用 intake_pick 挑课。
-  这些站要不要走由你判断：用户只让你「先看看有什么课」，那就只走到搜；他让你排，才排到底。
-- **绝不许**在机器是空的时候反问「先从哪科入手」「你想学什么科目」。
-  课程、题库、真题卷一样都没有的时候，正确的下一步是出去搜，不是问他。
-  你可以顺便问他日期和每天能学多久（这两样查不到，只有他知道），但不能拿这个当借口不动手。
-
-**查就查完（这条最容易犯）**：
-- 你在一句话里说要查几件事，就必须在这一轮把它们都查完再回答。
-  比如「得看今天还剩多少任务、离考试还有几天」—— 那就是两个工具：
-  plan_today + plan_budget，两个都要调，不能查一个就收工。
-- **绝不许**把「我自己一查就有」的东西推回给用户。下面这些都能自己查，不要问用户：
-  什么时候考试（plan_budget）、每天多少分钟（plan_budget）、学到第几讲（get_current_lesson）、
-  今天该干什么（plan_today）、错了多少题（stats_overview）、有哪些卷子（list_exam_papers）。
-- 准备回答之前自检一遍：这句话里如果还出现「我查一下」「我得看看」「我需要知道你…才能算」
-  「这个我没查到」这类字眼，说明还有活没干 —— 回去调工具，别把半截话交给用户。
-- 用户报了新的硬参数（每天学几小时、考试改成哪天、要加哪一科），**直接调对应的写工具**：
-  时长/日期就调 plan_set_budget（只改一项就只传那一项，比如 hours_per_day:3，它会把其余项沿用），
-  它会自己弹确认卡，人点头才执行；调完它会把重算结果一起给你，你照着复述就行。
-  **不要**先回一句「要不要我改」，也不要为了改个数字去走 intake 全流程（intake 是"从零接手"用的，
-  已经聊过、只是改一个数，就别再把用户拖过五站）。
-  而且是工具查完确认没有之后。这时候说清楚「本机没有这份数据」，不要绕 ——
-  但「本机没有」后面必须接一句「外面有什么」（搜过之后再说），不能只说前半句。
-- **查不到就报查不到，不许拿猜的数凑一版。** 不能说「先按已知的拟一版，等核出来再校正」——
-  「已知的」如果是你估的，那这版计划整个是假的，用户还会照着它去学。
-  查不到就说：这条没查到（差什么、为什么），然后把**已经查实的部分**给出来。
-  一个数是核过的、一个数是估的，要分开标清楚，不许混在同一张表里。
-
-**只读的事别问，直接做**：
-- 搜课程、看本机有什么、算覆盖多少 —— 这些都是只读的，**不要**问「要我现在就去找吗」
-  「要不要我帮你查」这种话，直接调工具做完再说。
-
-**要人拍板就用 ask，不要在正文里打一串字让人自己看**：
-- 下面这三样必须**用 ask 动作**问，不允许写在正文里让人自己打字：
-  ① 考哪几科 / 要学哪几科（多选）② 考试日期 ③ 每天能学多久。
-- **一次问全，不要一个问题一个来回。** 这几样都要问的时候，用 questions 数组
-  全部放进**同一个** ask 动作里 —— 界面会把它们画成一个框，人一次选完点一次「发出去」，
-  三样答案一起回来。别先问科目、等他答完再问日期，那是把一件事拆成三趟。
-  格式：
-  {"action":"ask","questions":[
-    {"question":"要学哪几科","options":["高等数学","英语","计算机基础","C 语言","政治"],"multi":true},
-    {"question":"考试是哪天","options":["2027-03-15","2027-04-15","我还不确定"]},
-    {"question":"每天能学多久","options":["1 小时","2 小时","3 小时","4 小时以上"]}
-  ]}
-  人也能在这个框里自己打字，所以选项给常见的几个就够，不用穷举。
-- 科目清单要**先列全再让人勾**。广东专升本工科通常这几门，按这个给选项（multi: true）：
-  高等数学、英语、计算机基础、C 语言、政治。用户说了别的省份或别的情况就按他说的改。
-  **不要**替他把科目定了，也不要只说「你想学哪科」就完事。
-- 只有一个问题要用 ask 时，老的写法照样能用：
-  {"action":"ask","question":"…","options":["…","…"],"multi":false}。
-
-**连续调用（别吃白饭）**：
-- 一件活儿要查好几处就连着查，一轮里可以把 find_tool / 检索 / 取数 / 再取数串起来。
-- **互不依赖的几件事，一次并着要**，别一件一件排队 —— 排队就是让人多等好几倍。
-  写法：{"action":"calls","list":[{"tool":"plan_today","args":{}},{"tool":"plan_budget","args":{}}]}
-  一次最多 6 件，只能放只读的（会改本机的工具单独调，要人点头）。
-  有先后关系的**不许**并发：比如先要讲课 id 再核这一讲 —— 那就分两步。
-- 该列清单就列清单：比如「要学哪几科」，先把科目列全（广东专升本工科通常是
-  高等数学、英语、计算机基础 / C 语言、政治），再用 ask 让人勾选。
-  不要替他把科目定了，也不要只给一句话让他自己想。
-
-回答长度：默认两三句。用户明确要求详细，才展开。
-用 Markdown 排版：分点用「- 」，重点用 **粗体**，多个并列项分行写清。
-"""
+#  SYS 原本是这里 157 行的内联文本，已抽到 server/prompts.py。
+#  它不依赖任何模块级状态，放这儿只会让找一行代码更难。
 
 
 # ---------------------------------------------------------------- 会话
@@ -372,8 +219,8 @@ def _stamp(trace=None, ask=None, card=None, pending=None, meta=None, think=None,
             if u:
                 meta = dict(meta)
                 meta["usage"] = u
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
     # 上下文是怎么拼的（折叠了几条、留了几条、吃紧没收紧）也钉上 ——
     # 状态条点开的详情读这一份，全是拼的时候数出来的。
     if meta is not None and "ctx" not in meta:
@@ -579,8 +426,8 @@ def _emit_turn(sid, turn_no, user_text, steps, final_text, reason, meta=None, ca
                          turn_no=turn_no, step_no=step)
         store.ev_add(sid, "turn/end", {"reason": reason, "meta": meta or {}},
                      turn_no=turn_no)
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
 
 
 def _rows_from_events(sid):
@@ -1007,8 +854,8 @@ def _remember_cand(name, data):
                 d["secs"] = int(it["secs"] or 0)
             if it.get("pages") and not d["pages"]:
                 d["pages"] = int(it.get("pages") or 0)
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as _e:
+            _silent.log_squash(__name__, _e)
         if not d["subject"]:
             # course_add 回来的 subject 是课程 id（english-bv1xxx），不是科目名，别拿它当科目
             subj = (str(it.get("subject_name") or "") if name == "course_add"
@@ -1400,8 +1247,8 @@ def _tool_exec(name, args, confirmed=False, sink=None):
             try:
                 sink({"t": "substep", "n": name, "msg": d.get("msg"),
                       "i": d.get("n"), "of": d.get("total")})
-            except Exception:
-                pass
+            except Exception as _e:
+                _silent.log_squash(__name__, _e)
     t0 = time.time()
     try:
         r = tools.call(name, args or {}, confirmed=confirmed, progress=prog)
@@ -1458,8 +1305,8 @@ def _run_tool(name, args, confirmed=False, sink=None):
     if sink:
         try:
             sink({"t": "run", "n": name, "desc": _TOOL_SAY.get(name) or name})
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
     r, ms = _tool_exec(name, args, confirmed, sink=sink)
     card, data, bad = _tool_post(name, args, r, ms)
     if sink:
@@ -1469,8 +1316,8 @@ def _run_tool(name, args, confirmed=False, sink=None):
                   "summary": card.get("summary"), "ui": card.get("ui"),
                   "error": card.get("error"),
                   "need_confirm": bool(card.get("need_confirm"))})
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
     if card.get("need_confirm"):
         return (None, card, {"tool": name, "args": args or {}, "desc": r.get("desc")})
     if r.get("ok"):
@@ -1608,8 +1455,8 @@ def _ask(sys_p, ctx, temperature=0.3, max_tokens=None, timeout=60, sink=None,
                 think.append(r)
             try:
                 sink({"t": "think", "d": r})
-            except Exception:
-                pass
+            except Exception as _e:
+                _silent.log_squash(__name__, _e)
             continue
         d = ev.get("d") or ""
         if not d:
@@ -1659,8 +1506,8 @@ def _sys_prompt(eff="medium", focus=None):
         note = modes.prompt_note()
         if note:
             base += "\n\n" + note
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     # 技能目录：只给名字 + 什么时候用。正文用 skill 工具现取 ——
     # 全塞进来会把上下文撑爆，而多数轮次一个技能都用不上。
     try:
@@ -1672,9 +1519,83 @@ def _sys_prompt(eff="medium", focus=None):
                 _d = _it.get("description") or ""
                 _lines.append("- " + _it["name"] + "：" + _d[:120])
             base += chr(10).join(_lines)
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
 
+
+    # 作答必须落库 —— 判断模型(第11章)的数据来源。
+    #
+    # 实测：用户说「我刚做了递归那道题，答错了」，模型回一句「记下了」就完事，
+    # 一次工具都没调。听着像记了，其实没记 —— 熟练度永远是空的。
+    try:
+        base += (
+            "\n\n【作答必须落库】他说自己答错了/做对了/花了多久/犹豫几次，"
+            "**都要调 mastery_record 记下来**，不能只回一句「记下了」。"
+            "没有题库 id 就直接用题目主题当 id（prompt=\"递归\"），"
+            "**不要先去 kb_search 找题号、再因为找不到而不记**。"
+        )
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
+    # 记忆：**不把内容塞进来，只告诉它「有这个东西、怎么用」**。
+    #
+    # 这是 2026-11-02 改的。之前的做法是每轮把 core + recall 十几条
+    # 原样贴进系统提示（prompt_note）。两个问题：
+    #   ① 那等于「每轮都背一遍通讯录」——大多数轮次用不上，纯烧 token；
+    #   ② 静态塞进去的东西，模型会当成**背景**而不是**工具**，
+    #      实测它不会主动引用（见附章五第 1 条实测记录）。
+    #
+    # 现在只给三件事：有多少条 / 什么时候该查 / 怎么查。
+    # 内容让它自己用 memory_recall 去捞 —— 跟 web_search 一样的用法。
+    # **它是辅助，不是前置**：查得到就用它理解你的处境，查不到照常上网查，
+    # 两者不冲突，模型自己判断。
+    try:
+        from . import memories as _mem, store as _st, layers as _ly
+        _wid = _st.kv_get("ws.current") or None
+        _rows = _mem.all_(workspace_id=_wid, limit=300)
+        _n = len(_rows)
+        if _n:
+            _sp = _ly.split(_rows)
+            _c = len(_sp.get(_ly.CORE, []))
+            _r = len(_sp.get(_ly.RECALL, []))
+            _a = len(_sp.get(_ly.ARCHIVAL, []))
+            base += (
+                "\n\n【你有一本关于他的记忆】共 %d 条"
+                "（常驻 %d / 近期 %d / 归档 %d）。\n"
+                "**这些内容不在这里，要用的时候自己查。**\n"
+                "该查的时候：他提到自己的目标、弱项、作息、偏好；"
+                "你要给建议、排计划、判断难易；或者你不确定他之前说过什么。\n"
+                "查法：memory_recall(q=\"你要找的那件事\", k=5)，"
+                "用的是向量 + 关键词混合检索，说自然语言就行。\n"
+                "**它是个辅助工具，不是必答题**：查不到就直说没记过，"
+                "该上网搜的照常 web_search / bili_search —— 两条路不冲突。\n"
+                "查到的东西要**真的用上**（引它、据此调整建议），"
+                "别查完当没看见。\n"
+                "另外：他说的新情况（目标变了、某个弱项补上了）用 memory_add 记；"
+                "他改主意了（时长变了、目标换了）—— 新说法用 memory_add 记，"
+                "同一条说法变了用 memory_correct 改（旧的会封存、不删，还能查历史）；"
+                "记错了用 memory_drop 删。"
+                "**绝对不许编造记忆。** 问到你记不记得什么时，必须真的调 memory_recall；"
+                "查不到就说「这个我没记过」，绝不许从常见题型/常见弱项里编一个出来。"
+                "（实测踩过：问「你还记得我的弱项吗」，它没调工具就答「英语完形填空」，"
+                "而库里根本没有这一条 —— 那是编的。）"
+                % (_n, _c, _r, _a)
+            )
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
+
+    # 作答必须落库 —— 判断模型(第11章)的数据来源。
+    #
+    # 实测：用户说「我刚做了递归那道题，答错了」，模型回一句「记下了」就完事，
+    # 一次工具都没调。听着像记了，其实没记 —— 熟练度永远是空的。
+    try:
+        base += (
+            "\n\n【作答必须落库】他说自己答错了/做对了/花了多久/犹豫几次，"
+            "**都要调 mastery_record 记下来**，不能只回一句「记下了」。"
+            "没有题库 id 就直接用题目主题当 id（prompt=\"递归\"），"
+            "**不要先去 kb_search 找题号、再因为找不到而不记**。"
+        )
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     return base
 
 
@@ -1690,6 +1611,28 @@ def turn(text, confirmed=None, focus=None, sink=None, effort=None, resuming=Fals
     # 以前这里一并拦掉，表现就是人点了确认，它回一句「说一句话再发过来」。
     if not text and not (confirmed and confirmed.get("tool")):
         return {"ok": False, "error": "说一句话再发过来"}
+
+    # 写时抽取（第 9 章 D30）：用户**这一句话**里有没有关于他自己的事。
+    #
+    # 为什么放在这里、而不是收尾时：
+    # ① 收尾可能被中断（超时、按停、模型炸）—— 那样这句「我晚上效率高」就丢了；
+    # ② 抽的是**用户说的话**，跟这一轮跑成什么样无关，越早落库越不会漏；
+    # ③ 它要赶在拼系统提示之前 —— 下一轮才看得见，这一轮不必（本轮上下文里本来就有）。
+    #
+    # 规则抽不准的宁可不记（少一条不致命），抽错了才是真麻烦。
+    try:
+        from . import memories as _memx, store as _stx
+        _xw = _stx.kv_get("ws.current") or None
+        _learned = _memx.learn_from_user(text, workspace_id=_xw)
+        if _learned and sink:
+            try:
+                sink({"t": "memory", "n": "learn", "n_got": len(_learned),
+                      "items": [{"kind": x["kind"], "content": x["content"][:80]}
+                                for x in _learned]})
+            except Exception as _e:
+                _silent.log_squash(__name__, _e)
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
 
     # 思考强度：调用方没指定就用上次存的那档。默认 medium ——
     # low 容易跳过该查的步骤，high 实测和 medium 打平（上游可能封顶）。
@@ -1814,8 +1757,8 @@ def turn(text, confirmed=None, focus=None, sink=None, effort=None, resuming=Fals
             try:
                 sink({"t": "step", "n": n, "label": label,
                       "total": total or 0, "done": len(trace)})
-            except Exception:
-                pass
+            except Exception as _e:
+                _silent.log_squash(__name__, _e)
 
     for rnd in range(MAX_ROUND):
         _hit = _hit_stop()
@@ -1847,8 +1790,8 @@ def turn(text, confirmed=None, focus=None, sink=None, effort=None, resuming=Fals
                     if sink is not None:
                         try:
                             sink({"t": "run", "n": "retry", "desc": "它只在想没说话，催一次"})
-                        except Exception:
-                            pass
+                        except Exception as _e:
+                            _silent.log_squash(__name__, _e)
                     continue
             # 路由被 platform_ai 当场修好了（function 对不上 / 名字不在目录里）：
             # 这一枪打空的原因在路由上，不在活上，重问一次就行 ——
@@ -1859,8 +1802,8 @@ def turn(text, confirmed=None, focus=None, sink=None, effort=None, resuming=Fals
                 if sink is not None:
                     try:
                         sink({"t": "run", "n": "retry", "desc": "模型没吐字，路由修好了再问一次"})
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        _silent.log_squash(__name__, _e)
                 msgs.append({"role": "system", "content":
                              "上一轮模型一个字都没吐出来。现在直接回答，不要输出空白。"})
                 ctx = _render_ctx(msgs)
@@ -1875,8 +1818,8 @@ def turn(text, confirmed=None, focus=None, sink=None, effort=None, resuming=Fals
             if sink is not None:
                 try:
                     sink({"t": "run", "n": "retry", "desc": "这一轮它没说话，再问一次"})
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _silent.log_squash(__name__, _e)
             msgs.append({"role": "system", "content":
                          "刚才那一轮你一个字都没回。要么直接把结论说出来，要么调工具；"
                          "不要输出空白。"})
@@ -1925,6 +1868,55 @@ def turn(text, confirmed=None, focus=None, sink=None, effort=None, resuming=Fals
                              "stats_overview），不要问用户。现在去调，调完再回答。" % weak})
                 ctx = _render_ctx(msgs)
                 continue
+
+            # ---- 记忆编造闸（2026-11-02 加）----
+            #
+            # 实测：问「你还记得我的弱项吗」，模型**一次工具都没调**，
+            # 直接答「英语完形填空」—— 而库里根本没有这一条。
+            # 提示词里写「绝对不许编造记忆」试过一次，没用（它照样编）。
+            #
+            # 判据：回答里有「我在引用记忆」的口吻（记得/记过/你说过/你的弱项…），
+            # 但这一轮 trace 里没有任何 memory_* 调用 → 打回去重答。
+            _mem_used = any(
+                'memory' in str(t.get('tool') or '')
+                for t in trace if isinstance(t, dict))
+            _MEM_CLAIM = ('记得', '记过', '你说过', '你跟我说过', '你的弱项', '你的目标')
+            if not _mem_used and any(kw in (say or '') for kw in _MEM_CLAIM):
+                _n_fix = locals().get('_mem_fix', 0) + 1
+                _mem_fix = _n_fix
+                if _n_fix <= 1:
+                    # 只重试一次：重复重试会让模型在「没记过 → 记过但没记着 → 没记过」
+                    # 之间自我打转，界面上同一句话来回改（实测）。
+                    #
+                    # 关键：**把已经吐出去的字也撤掉**（say = ""）并重开会话末尾，
+                    # 否则模型的第二遍会接在第一遍后面 —— 表现就是「这句话说了两遍」。
+                    say = ''
+                    # 告诉前端：把这一轮已经收到的正文清掉。
+                    # 不清的话，闸门打回后的重答会**接在旧文后面** ——
+                    # 界面上就是同一句话说两遍（实测：只清后端的 say 没用，
+                    # 前端是 acc += d 累积的，它不知道前面那版已作废）。
+                    if sink is not None:
+                        try:
+                            sink({'t': 'retract'})
+                        except Exception as _e:
+                            _silent.log_squash(__name__, _e)
+                    # 这里**不往 sink 推事件**。之前推过一条 memory 事件，
+                    # 前端会在正文里收到一段游离的 JSON 碎片（实测）。
+                    # 闸门是内部纠错，不该让人看见。
+                    msgs.append({'role': 'system', 'content':
+                                 '**停。你还没有查过记忆，不能回答「记得……」。**\n'
+                                 '现在只做一件事：调用 memory_recall(q=\'关于他的那句话\')。\n'
+                                 '查完拿到结果再开口。查不到就说「这个我没记过」。'})
+                    ctx = _render_ctx(msgs)
+                    continue
+                # 给过一次机会还直接答：不再让它改口（改口必然重复），
+                # 直接换成一句不涉及记忆的答复。
+                #
+                # 注意：这里只是**替换最终文本**，不要再往 sink 里推东西 ——
+                # 之前那样做会让前端收到一段游离的 JSON 碎片拼在正文后面（实测）。
+                say = '这个我没查过，先不凭印象说。要我查一下记忆吗？'
+            # 闸门放行之后才把这句话收进上下文 ——
+            # 放在闸门之前会让「编的那一版」留在对话里，模型下一轮会顺着它继续编（实测）。
             msgs.append({"role": "assistant", "content": say})
             _save(msgs)
             _stamp(trace=trace, pending=pending, think=think, steps=steps,
@@ -1978,8 +1970,8 @@ def turn(text, confirmed=None, focus=None, sink=None, effort=None, resuming=Fals
                     try:
                         sink({"t": "run", "n": "parallel",
                               "desc": "同时查 %d 件事" % len(ready)})
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        _silent.log_squash(__name__, _e)
                 outs = _run_tools_parallel(ready, sink=sink)
                 for c2, o2, _pend2 in outs:
                     trace.append(c2)
@@ -2006,8 +1998,8 @@ def turn(text, confirmed=None, focus=None, sink=None, effort=None, resuming=Fals
                     sink({"t": "tool", "n": "catalog", "ms": 0, "ok": True,
                           "args": {"q": act.get("q")},
                           "summary": (cat.get("text") or "")[:200]})
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _silent.log_squash(__name__, _e)
             msgs.append({"role": "assistant", "content": say})
             msgs.append({"role": "system", "content":
                          "这一堆工具是全的：\n%s\n\n%s" % (cat.get("text") or "", _CALL_HINT)})
@@ -2024,8 +2016,8 @@ def turn(text, confirmed=None, focus=None, sink=None, effort=None, resuming=Fals
                     sink({"t": "tool", "n": "find_tool", "ms": 0, "ok": found["ok"],
                           "args": {"q": act.get("q")},
                           "summary": _clip(found.get("tools") or [])[:300]})
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _silent.log_squash(__name__, _e)
             body = ('检索「%s」得到这些工具：\n%s\n\n'
                     % (act.get('q'), _tool_card(found.get('tools') or [])
                        or '（一个都没找到）')) + _CALL_HINT
@@ -2075,8 +2067,8 @@ def turn(text, confirmed=None, focus=None, sink=None, effort=None, resuming=Fals
                         try:
                             sink({"t": "run", "n": "spin",
                                   "desc": "它在「%s」之间打转，打断它" % _names})
-                        except Exception:
-                            pass
+                        except Exception as _e:
+                            _silent.log_squash(__name__, _e)
                     msgs.append({"role": "assistant", "content": say})
                     msgs.append({"role": "system", "content":
                                  "你已经在 %s 之间来回调了 %d 次，结果不会变。"
@@ -2241,8 +2233,8 @@ def resume(sink=None, effort=None):
     # 摘掉这条 user，让 turn() 重新追加（否则上下文里会出现两遍同一句）
     try:
         msgs.remove(u)
-    except ValueError:
-        pass
+    except ValueError as _e:
+        _silent.log_squash(__name__, _e)
     _save(msgs)
     return turn(text, focus=u.get("focus"), sink=sink, effort=effort, resuming=True)
 
@@ -2577,8 +2569,8 @@ def _parse_dsml(say):
             if is_str != "true":          # string="false" 的那一路值是 JSON
                 try:
                     v = json.loads(v)
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _silent.log_squash(__name__, _e)
             kv[pname] = v
         if kv.get("tool"):
             items.append((act.lower(), kv))

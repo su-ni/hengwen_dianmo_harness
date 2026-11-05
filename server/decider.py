@@ -11,6 +11,7 @@
 import datetime as dt
 
 from . import config, store
+from . import silent as _silent
 
 # 档位：先分档再档内排序。档位是硬顺序 —— 逾期没复习的词永远比新词优先，
 # 不会因为新词「高频」就插队。这是复习的常识，不是算出来的。
@@ -157,8 +158,8 @@ def rank(words, mems=None, freq_index=None, stars=None, today_s=None,
     if limit:
         try:
             rows = rows[:max(int(limit), 1)]
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as _e:
+            _silent.log_squash(__name__, _e)
 
     parts = ["%s %d" % (TIER_NAME[k], tiers[k]) for k in TIER_ORDER if tiers.get(k)]
     rule = ("排卡顺序按本机记录算出来：逾期没复习的先来，然后今天到期、答错过、"

@@ -13,6 +13,7 @@ import re
 import datetime as dt
 
 from . import config, store
+from . import silent as _silent
 
 # 大块数据不进首屏：按需由工具取
 _proto_cache = {"key": None, "data": None}
@@ -1311,8 +1312,8 @@ def default_source():
         for s in item_sources():
             if s.get("total"):
                 return s["id"]
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     return None
 
 

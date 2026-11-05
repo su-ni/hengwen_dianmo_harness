@@ -13,6 +13,7 @@ import json
 import os
 
 from . import config, datahub, store
+from . import silent as _silent
 
 KV_DATE = "plan.exam_date"        # YYYY-MM-DD
 KV_MIN = "plan.minutes_per_day"   # 每天能学多少分钟
@@ -45,8 +46,8 @@ def _patch_file(**kw):
         with open(tmp, "w", encoding="utf-8", newline="\n") as f:
             json.dump(cur, f, ensure_ascii=False, indent=2)
         os.replace(tmp, PLAN_FILE)
-    except OSError:
-        pass
+    except OSError as _e:
+        _silent.log_squash(__name__, _e)
 
 # 时间轴像素口径（跟 web/app.css 里 .tl 的刻度对齐：06:00=0px，08:00=65px）
 TL_START_HOUR = 6

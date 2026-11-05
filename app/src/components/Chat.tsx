@@ -14,8 +14,10 @@ import { md } from '../md'
 import { Logo } from './Logo'
 import { TurnRail, turnsOf } from './TurnRail'
 import { CommandPalette, detectCmd, type CmdItem } from './CommandPalette'
+import { AskBox, type Ask, type AskOpt, type AskGroup } from './AskBox'
 import { ModePicker } from './ModePicker'
 import { PlanCard as PlanDocCard, type PlanDoc } from './PlanCard'
+import { streamAgent, type StreamEvent } from '../lib/agentStream'
 
 /* ================= 今日页：一个能聊的助手 =================
 
@@ -53,17 +55,6 @@ type Card = { title?: string; note?: string; actions: CardAct[] }
 
 /* 一个提问框：模型要人拍板时给出来的可点选项。
    单选点一下就走；多选要先勾再点「就这些」。 */
-type AskOpt = { label: string; value: string }
-/* 一组问题。模型一轮问几样就有几组 —— 都在同一个框里问完、一次发出去。 */
-type AskGroup = { question: string; options: AskOpt[]; multi: boolean; hint?: string }
-type Ask = {
-  /* 单组时用这两个（老格式，后端也还这么给）；多组时看 groups。 */
-  question?: string
-  options?: AskOpt[]
-  multi?: boolean
-  groups?: AskGroup[]
-  hint?: string
-}
 
 /* 用量：全是上游 token_usage 里数出来的字段。拿不到就没有这一项 ——
    状态条宁可缺一块，也不给估出来的数字。 */
@@ -474,7 +465,9 @@ function ToolLine({ x }: { x: Trace }) {
    三十秒核六门课 —— 界面上跟卡死一模一样。所以改成走 /api/tool/{name}/run（SSE）：
    开始、中间每一步、结果都推过来，界面照着画。
    工具自己没报进度也照样看得见「在跑」—— 至少有一条「跑着…」在动。 */
-type RunStep = { id: number; msg: string; n?: number; total?: number }
+/* mem=true：这一行是「它记住了什么」，不是工具调用 —— 界面上要分开画，
+   不能混在工具轨迹里（人会把「记住了」当成「调了个叫记住的工具」）。 */
+type RunStep = { id: number; msg: string; n?: number; total?: number; mem?: boolean }
 
 async function runToolStream(
   tool: string, args: Record<string, any>, confirm: boolean,
@@ -506,6 +499,14 @@ async function runToolStream(
           onStep({ id: k++, msg: (o.desc || o.tool) + '' })
         } else if (o.t === 'step') {
           onStep({ id: k++, msg: o.msg || '', n: o.n, total: o.total })
+        } else if (o.t === 'memory') {
+          /* 写时抽取落了库 —— 让人**当场看见它记住了什么**。
+             不反馈的话，记忆是个黑盒：用户永远不知道它记了没有、记对没有，
+             也就永远不敢把重要的东西交给它。这里只报一行，一行就好。
+             记错了怎么办：去 haloflux 记忆场里点掉（那条路已经通了）。 */
+          const items = (o.items || []) as any[]
+          const txt = items.map((x: any) => x.content).join('；')
+          onStep({ id: k++, msg: '记住了：' + (txt.length > 60 ? txt.slice(0, 60) + '…' : txt), mem: true })
         } else if (o.t === 'alive') {
           /* 工具自己没报进度：至少把「还活着 + 真过了几秒」摆出来。
              用固定 id，界面上是同一行在跳秒，不会堆成十几行。 */
@@ -861,114 +862,6 @@ function ChatStat({ m, busy }: { m?: Msg; busy: boolean }) {
   )
 }
 
-function AskBox({ a, locked, onSend }: { a: Ask; locked?: boolean; onSend: (txt: string) => void }) {
-  const groups: AskGroup[] = a.groups && a.groups.length
-    ? a.groups
-    : [{ question: a.question || '', options: a.options || [], multi: !!a.multi }]
-  /* picked[i]：第 i 组勾中的 value 列表；extra[i]：第 i 组人自己打的字。 */
-  const [picked, setPicked] = useState<string[][]>(() => groups.map(() => []))
-  const [extra, setExtra] = useState<string[]>(() => groups.map(() => ''))
-
-  const toggle = (gi: number, v: string) => {
-    if (locked) return
-    setPicked((p) => {
-      const n = p.map((x) => x.slice())
-      const cur = n[gi] || []
-      if (groups[gi].multi) {
-        n[gi] = cur.indexOf(v) >= 0 ? cur.filter((x) => x !== v) : cur.concat([v])
-      } else {
-        n[gi] = cur[0] === v ? [] : [v]   /* 单选框再点一下能取消 —— 选错了得有退路 */
-      }
-      return n
-    })
-  }
-  /* 人自己写的字也留一份在 ref 里：React 的 setState 是异步的，
-     手快的人写完立刻按 Enter，这一帧 extra 还是旧的，会被判成「没答」。
-     两个来源都算数，就不怕先后顺序。 */
-  const extraRef = useRef<string[]>(groups.map(() => ''))
-  const setEx = (gi: number, s: string) => {
-    extraRef.current[gi] = s
-    setExtra((p) => { const n = p.slice(); n[gi] = s; return n })
-  }
-
-  /* 一组里有几样都算「答了」：勾了选项，或者自己写了字。 */
-  const filled = (gi: number) =>
-    (picked[gi] || []).length > 0 || (extra[gi] || '').trim().length > 0 ||
-    (extraRef.current[gi] || '').trim().length > 0
-  const ready = groups.length > 0 && groups.every((_, gi) => filled(gi))
-  const nth = groups.length > 1 ? groups.filter((_, gi) => filled(gi)).length : 0
-
-  /* 拼成一句话发回去。一组一问就原样给答案；多组就「问：答」分行 ——
-     模型看得懂，人也看得懂自己刚发了什么。 */
-  const submit = () => {
-    if (!ready || locked) return
-    const lines: string[] = []
-    groups.forEach((g, gi) => {
-      const parts: string[] = []
-      const pk = picked[gi] || []
-      if (pk.length) parts.push(pk.join('、'))
-      const ex = ((extra[gi] || '') || (extraRef.current[gi] || '')).trim()
-      if (ex) parts.push(ex)
-      if (!parts.length) return
-      const ans = parts.join('；')
-      lines.push(groups.length > 1 && g.question ? g.question + '：' + ans : ans)
-    })
-    if (lines.length) onSend(lines.join('\n'))
-  }
-
-  return (
-    <div className={'cask' + (locked ? ' locked' : '')}>
-      {groups.map((g, gi) => (
-        <div className="cask-g" key={gi}>
-          <b className="cask-q">
-            {groups.length > 1 && <span className="cask-no">{gi + 1}</span>}
-            {g.question || '想清楚了吗'}
-            <em className="cask-tag">{g.multi ? '可多选' : '单选'}</em>
-          </b>
-          {g.options.length > 0 && (
-            <div className="cask-opts">
-              {g.options.map((o) => {
-                const on = (picked[gi] || []).indexOf(o.value) >= 0
-                return (
-                  <button
-                    key={o.value}
-                    className={'cask-opt' + (on ? ' on' : '')}
-                    disabled={locked}
-                    onClick={() => toggle(gi, o.value)}
-                  >
-                    <span className="cask-box" data-on={on ? '1' : '0'} data-multi={g.multi ? '1' : '0'} />
-                    {o.label}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-          {/* 选项里没有的那一条：人自己有话说。这是「完整提问」，不是猜谜。 */}
-          {!locked && (
-            <input
-              className="cask-in"
-              value={extra[gi] || ''}
-              placeholder={g.hint || (g.options.length ? '或者自己写' : '自己写一句：日期、时长、科目都行')}
-              onChange={(e) => setEx(gi, e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
-            />
-          )}
-        </div>
-      ))}
-      <div className="cask-ft">
-        <span className="cask-n">
-          {locked ? '已经发出去了'
-            : !ready ? (groups.length > 1 ? '还有 ' + (groups.length - nth) + ' 个没答' : '选一个，或者自己写')
-              : groups.length > 1 ? groups.length + ' 个都答了' : '可以发'}
-        </span>
-        <div className="sp" />
-        <button className="btn sm act" onClick={submit} disabled={!ready || locked}>
-          {locked ? '已发送' : '发出去'}
-        </button>
-      </div>
-    </div>
-  )
-}
 
 export function Chat({
   page,
@@ -1403,131 +1296,112 @@ export function Chat({
     let roundsHitCap = false
 
     try {
-      const res = await fetch('/api/agent/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // 档位由 EffortPicker 写在后端，这里不用再传；后端 turn() 自己读 kv。
-        body: JSON.stringify({ text: forModel, confirmed: confirmed || null, focus: page }),
+      ended = await streamAgent({
+        body: { text: forModel, confirmed: confirmed || null, focus: page },
         signal: ac.signal,
-      })
-      if (!res.ok || !res.body) throw new Error('HTTP ' + res.status)
-      const rd = res.body.getReader()
-      const dec = new TextDecoder()
-      let buf = ''
-      for (;;) {
-        const { done, value } = await rd.read()
-        if (done) break
-        buf += dec.decode(value, { stream: true })
-        /* SSE 用空行分帧；收到的那一块可能断在半行，剩下的留在 buf 等下一块 */
-        let cut = buf.indexOf('\n\n')
-        while (cut >= 0) {
-          const frame = buf.slice(0, cut)
-          buf = buf.slice(cut + 2)
-          cut = buf.indexOf('\n\n')
-          for (const line of frame.split('\n')) {
-            if (!line.startsWith('data:')) continue
-            let o: Record<string, unknown>
-            try { o = JSON.parse(line.slice(5).trim()) } catch { continue }
-            const kind = o.t as string
-            if (kind === 'token') {
-              const d = (o.d as string) || ''
-              if (!d) continue
-              acc += d
-              sealThink(steps)          // 开始说话了，上一段思考到此为止
-              patchA({ text: acc, steps: cloneSteps(steps) })
-            } else if (kind === 'think') {
-              const d = (o.d as string) || ''
-              if (!d) continue
-              think += d
-              /* 还是同一段思考就往后接，已经调过工具了就另起一段 ——
-                 这样「想→做→再想」在界面上是三个块，不是一个越来越长的气泡。 */
-              const tail = steps[steps.length - 1]
-              if (tail && tail.k === 'think' && !tail.done) tail.t += d
-              else steps.push({ k: 'think', t: d })
-              patchA({ steps: cloneSteps(steps), think })
-            } else if (kind === 'step') {
-              /* 它在干活，不是卡住了：把「第几轮」「正在做什么」推到界面上。 */
-              stepRef.current = {
-                n: (o.n as number) || 0,
-                total: (o.total as number) || 20,
-                label: (o.label as string) || '',
-                doing: stepRef.current?.doing || '',
-                done: (o.done as number) || 0,
-              }
-              setStep({ ...stepRef.current })
-            } else if (kind === 'run') {
-              /* 某个慢工具刚开跑：这一刻起它确实在等接口，不是死机。 */
-              if (onRun) onRun(String(o.n || ''), String(o.desc || ''))
-              stepRef.current = {
-                n: stepRef.current?.n || 1,
-                total: stepRef.current?.total || 20,
-                label: stepRef.current?.label || '',
-                doing: (o.desc as string) || (o.n as string) || '',
-                done: stepRef.current?.done || 0,
-              }
-              setStep({ ...stepRef.current })
-            } else if (kind === 'substep') {
-              /* 工具内部的一小步：「核第 3/6 条 · BV1xx —— 136 P / 103.1 小时」。
-                 这不是动画，是工具自己报的真进度；没有它，跑三十秒和卡死长得一样。 */
-              stepRef.current = {
-                n: stepRef.current?.n || 1,
-                total: stepRef.current?.total || 20,
-                label: stepRef.current?.label || '',
-                doing: ((o.msg as string) || '') +
-                  (typeof o.i === 'number' && typeof o.of === 'number' ? `（${o.i}/${o.of}）` : ''),
-                done: stepRef.current?.done || 0,
-              }
-              setStep({ ...stepRef.current })
-            } else if (kind === 'tool') {
-              trace.push({
-                tool: (o.n as string) || '',
-                args: (o.args as Record<string, unknown>) || {},
-                ms: (o.ms as number) || 0,
-                ok: !!o.ok,
-                summary: (o.summary as string) || undefined,
-                ui: (o.ui as Trace['ui']) || null,
-                error: (o.error as string) || undefined,
-                need_confirm: !!o.need_confirm,
-              } as Trace)
-              sealThink(steps)          // 要调工具了，这段思考想完了
-              steps.push({ k: 'tool', x: trace[trace.length - 1] })
-              if (onTool) onTool(trace[trace.length - 1])
-              patchA({ steps: cloneSteps(steps), trace: trace.slice() })
-            } else if (kind === 'end') {
-              ended = true
-              const mr = (o.max_rounds as number) || 0
-              roundsHitCap = mr > 0 && ((o.rounds as number) || 0) >= mr
-              const finalText = (o.text as string) || acc
-              sealThink(steps)
-              patchA({
-                text: finalText,
-                think: think || undefined,
-                trace: trace.slice(),
-                steps: cloneSteps(steps),
-                pending: (o.pending as Pending) || null,
-                ask: (o.ask as Ask) || null,
-                /* 操作卡必须挂上去。原来这里漏了 card 这一行，后端明明把卡片推过来了，
-                   屏幕上却只剩一句「这几个核过的，点一下就入库」—— 按钮一颗都没有。
-                   刷新一下反而能看到（那是从记录里恢复的），所以这个 bug 只在当场出现。 */
-                card: (o.card as Card) || null,
-                suggest: Array.isArray(o.suggest) ? (o.suggest as string[]) : null,
-                plans: Array.isArray(o.plans) ? (o.plans as PlanDoc[]) : null,
-                meta: {
-                  provider: o.provider as string,
-                  model: o.model as string,
-                  rounds: o.rounds as number,
-                  max_rounds: mr,
-                  usage: (o.usage as Usage) || null,
-                  ctx: (o.ctx as CtxInfo) || null,
-                },
-              })
-              if (!o.ok) setErr((o.error as string) || '没回话')
-            } else if (kind === 'err') {
-              setErr((o.error as string) || '出错了')
+        onEvent: (o: StreamEvent) => {
+          const kind = o.t as string
+          // retract：模型这一版被判定为「没查记忆就编」，整版作废。
+          // 不清空 acc 的话，重答会接在旧文后面 —— 界面上同一句话说两遍。
+          if (kind === 'retract') { acc = ''; patchA({ text: '', steps: cloneSteps(steps) }); return }
+          if (kind === 'token') {
+            const d = (o.d as string) || ''
+            if (!d) return
+            acc += d
+            sealThink(steps)          // 开始说话了，上一段思考到此为止
+            patchA({ text: acc, steps: cloneSteps(steps) })
+          } else if (kind === 'think') {
+            const d = (o.d as string) || ''
+            if (!d) return
+            think += d
+            /* 还是同一段思考就往后接，已经调过工具了就另起一段 ——
+               这样「想→做→再想」在界面上是三个块，不是一个越来越长的气泡。 */
+            const tail = steps[steps.length - 1]
+            if (tail && tail.k === 'think' && !tail.done) tail.t += d
+            else steps.push({ k: 'think', t: d })
+            patchA({ steps: cloneSteps(steps), think })
+          } else if (kind === 'step') {
+            /* 它在干活，不是卡住了：把「第几轮」「正在做什么」推到界面上。 */
+            stepRef.current = {
+              n: (o.n as number) || 0,
+              total: (o.total as number) || 20,
+              label: (o.label as string) || '',
+              doing: stepRef.current?.doing || '',
+              done: (o.done as number) || 0,
             }
+            setStep({ ...stepRef.current })
+          } else if (kind === 'run') {
+            /* 某个慢工具刚开跑：这一刻起它确实在等接口，不是死机。 */
+            if (onRun) onRun(String(o.n || ''), String(o.desc || ''))
+            stepRef.current = {
+              n: stepRef.current?.n || 1,
+              total: stepRef.current?.total || 20,
+              label: stepRef.current?.label || '',
+              doing: (o.desc as string) || (o.n as string) || '',
+              done: stepRef.current?.done || 0,
+            }
+            setStep({ ...stepRef.current })
+          } else if (kind === 'substep') {
+            /* 工具内部的一小步：「核第 3/6 条 · BV1xx —— 136 P / 103.1 小时」。
+               这不是动画，是工具自己报的真进度；没有它，跑三十秒和卡死长得一样。 */
+            stepRef.current = {
+              n: stepRef.current?.n || 1,
+              total: stepRef.current?.total || 20,
+              label: stepRef.current?.label || '',
+              doing: ((o.msg as string) || '') +
+                (typeof o.i === 'number' && typeof o.of === 'number' ? `（${o.i}/${o.of}）` : ''),
+              done: stepRef.current?.done || 0,
+            }
+            setStep({ ...stepRef.current })
+          } else if (kind === 'tool') {
+            trace.push({
+              tool: (o.n as string) || '',
+              args: (o.args as Record<string, unknown>) || {},
+              ms: (o.ms as number) || 0,
+              ok: !!o.ok,
+              summary: (o.summary as string) || undefined,
+              ui: (o.ui as Trace['ui']) || null,
+              error: (o.error as string) || undefined,
+              need_confirm: !!o.need_confirm,
+            } as Trace)
+            sealThink(steps)          // 要调工具了，这段思考想完了
+            steps.push({ k: 'tool', x: trace[trace.length - 1] })
+            if (onTool) onTool(trace[trace.length - 1])
+            patchA({ steps: cloneSteps(steps), trace: trace.slice() })
+          } else if (kind === 'end') {
+            ended = true
+            const mr = (o.max_rounds as number) || 0
+            roundsHitCap = mr > 0 && ((o.rounds as number) || 0) >= mr
+            const finalText = (o.text as string) || acc
+            sealThink(steps)
+            patchA({
+              text: finalText,
+              think: think || undefined,
+              trace: trace.slice(),
+              steps: cloneSteps(steps),
+              pending: (o.pending as Pending) || null,
+              ask: (o.ask as Ask) || null,
+              /* 操作卡必须挂上去。原来这里漏了 card 这一行，后端明明把卡片推过来了，
+                 屏幕上却只剩一句「这几个核过的，点一下就入库」—— 按钮一颗都没有。
+                 刷新一下反而能看到（那是从记录里恢复的），所以这个 bug 只在当场出现。 */
+              card: (o.card as Card) || null,
+              suggest: Array.isArray(o.suggest) ? (o.suggest as string[]) : null,
+              plans: Array.isArray(o.plans) ? (o.plans as PlanDoc[]) : null,
+              meta: {
+                provider: o.provider as string,
+                model: o.model as string,
+                rounds: o.rounds as number,
+                max_rounds: mr,
+                usage: (o.usage as Usage) || null,
+                ctx: (o.ctx as CtxInfo) || null,
+              },
+            })
+            if (!o.ok) setErr((o.error as string) || '没回话')
+          } else if (kind === 'err') {
+            setErr((o.error as string) || '出错了')
           }
-        }
-      }
+        },
+      })
       if (!ended) setErr('连接断了，这句没答完')
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
@@ -1576,88 +1450,69 @@ export function Chat({
     let ended = false
     let capped = false
     try {
-      const res = await fetch('/api/agent/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: '', resume: true, focus: page }),
+      ended = await streamAgent({
+        body: { text: '', resume: true, focus: page },
         signal: ac.signal,
-      })
-      if (!res.ok || !res.body) throw new Error('HTTP ' + res.status)
-      const rd = res.body.getReader()
-      const dec = new TextDecoder()
-      let buf = ''
-      for (;;) {
-        const { done, value } = await rd.read()
-        if (done) break
-        buf += dec.decode(value, { stream: true })
-        let cut = buf.indexOf('\n\n')
-        while (cut >= 0) {
-          const frame = buf.slice(0, cut)
-          buf = buf.slice(cut + 2)
-          cut = buf.indexOf('\n\n')
-          for (const line of frame.split('\n')) {
-            if (!line.startsWith('data:')) continue
-            let o: Record<string, unknown>
-            try { o = JSON.parse(line.slice(5).trim()) } catch { continue }
-            const kind = o.t as string
-            if (kind === 'token') { const d = (o.d as string) || ''; if (!d) continue; acc += d; sealThink(steps); patchA({ text: acc, steps: cloneSteps(steps) }) }
-            else if (kind === 'think') {
-              const d = (o.d as string) || ''
-              if (!d) continue
-              think += d
-              const tail = steps[steps.length - 1]
-              if (tail && tail.k === 'think' && !tail.done) tail.t += d
-              else steps.push({ k: 'think', t: d })
-              patchA({ steps: cloneSteps(steps), think })
-            }
-            else if (kind === 'step') {
-              stepRef.current = { n: (o.n as number) || 0, total: (o.total as number) || 20, label: (o.label as string) || '', doing: stepRef.current?.doing || '', done: (o.done as number) || 0 }
-              setStep({ ...stepRef.current })
-            }
-            else if (kind === 'run') {
-              if (onRun) onRun(String(o.n || ''), String(o.desc || ''))
-              stepRef.current = { n: stepRef.current?.n || 1, total: stepRef.current?.total || 20, label: stepRef.current?.label || '', doing: (o.desc as string) || (o.n as string) || '', done: stepRef.current?.done || 0 }
-              setStep({ ...stepRef.current })
-            }
-            else if (kind === 'substep') {
-              stepRef.current = { n: stepRef.current?.n || 1, total: stepRef.current?.total || 20, label: stepRef.current?.label || '',
-                doing: ((o.msg as string) || '') + (typeof o.i === 'number' && typeof o.of === 'number' ? `（${o.i}/${o.of}）` : ''),
-                done: stepRef.current?.done || 0 }
-              setStep({ ...stepRef.current })
-            }
-            else if (kind === 'tool') {
-              trace.push({ tool: (o.n as string) || '', args: (o.args as Record<string, unknown>) || {}, ms: (o.ms as number) || 0, ok: !!o.ok, summary: (o.summary as string) || undefined, ui: (o.ui as Trace['ui']) || null, error: (o.error as string) || undefined } as Trace)
-              sealThink(steps)
-              steps.push({ k: 'tool', x: trace[trace.length - 1] })
-              if (onTool) onTool(trace[trace.length - 1])
-              patchA({ steps: cloneSteps(steps), trace: trace.slice() })
-            } else if (kind === 'end') {
-              ended = true
-              const mr2 = (o.max_rounds as number) || 0
-              capped = mr2 > 0 && ((o.rounds as number) || 0) >= mr2
-              sealThink(steps)
-              patchA({
-                text: (o.text as string) || acc,
-                think: think || undefined,
-                trace: trace.slice(),
-                steps: cloneSteps(steps),
-                pending: (o.pending as Pending) || null,
-                ask: (o.ask as Ask) || null,
-                /* 续跑这条路原来也漏了 card：捡回来的那半截活干完给了卡片，
-                   屏幕上照样一颗按钮都没有。两条路必须同时补，否则「按继续」又是空的。 */
-                card: (o.card as Card) || null,
-                meta: {
-                  provider: o.provider as string, model: o.model as string,
-                  rounds: o.rounds as number, max_rounds: mr2,
-                  usage: (o.usage as Usage) || null,
-                  ctx: (o.ctx as CtxInfo) || null,
-                },
-              })
-              if (!o.ok) setErr((o.error as string) || '没回话')
-            } else if (kind === 'err') setErr((o.error as string) || '出错了')
+        onEvent: (o: StreamEvent) => {
+          const kind = o.t as string
+          if (kind === 'retract') { acc = ''; patchA({ text: '', steps: cloneSteps(steps) }); return }
+          if (kind === 'token') { const d = (o.d as string) || ''; if (!d) return; acc += d; sealThink(steps); patchA({ text: acc, steps: cloneSteps(steps) }) }
+          else if (kind === 'think') {
+            const d = (o.d as string) || ''
+            if (!d) return
+            think += d
+            const tail = steps[steps.length - 1]
+            if (tail && tail.k === 'think' && !tail.done) tail.t += d
+            else steps.push({ k: 'think', t: d })
+            patchA({ steps: cloneSteps(steps), think })
           }
-        }
-      }
+          else if (kind === 'step') {
+            stepRef.current = { n: (o.n as number) || 0, total: (o.total as number) || 20, label: (o.label as string) || '', doing: stepRef.current?.doing || '', done: (o.done as number) || 0 }
+            setStep({ ...stepRef.current })
+          }
+          else if (kind === 'run') {
+            if (onRun) onRun(String(o.n || ''), String(o.desc || ''))
+            stepRef.current = { n: stepRef.current?.n || 1, total: stepRef.current?.total || 20, label: stepRef.current?.label || '', doing: (o.desc as string) || (o.n as string) || '', done: stepRef.current?.done || 0 }
+            setStep({ ...stepRef.current })
+          }
+          else if (kind === 'substep') {
+            stepRef.current = { n: stepRef.current?.n || 1, total: stepRef.current?.total || 20, label: stepRef.current?.label || '',
+              doing: ((o.msg as string) || '') + (typeof o.i === 'number' && typeof o.of === 'number' ? `（${o.i}/${o.of}）` : ''),
+              done: stepRef.current?.done || 0 }
+            setStep({ ...stepRef.current })
+          }
+          else if (kind === 'tool') {
+            trace.push({ tool: (o.n as string) || '', args: (o.args as Record<string, unknown>) || {}, ms: (o.ms as number) || 0, ok: !!o.ok, summary: (o.summary as string) || undefined, ui: (o.ui as Trace['ui']) || null, error: (o.error as string) || undefined } as Trace)
+            sealThink(steps)
+            steps.push({ k: 'tool', x: trace[trace.length - 1] })
+            if (onTool) onTool(trace[trace.length - 1])
+            patchA({ steps: cloneSteps(steps), trace: trace.slice() })
+          } else if (kind === 'end') {
+            ended = true
+            const mr2 = (o.max_rounds as number) || 0
+            capped = mr2 > 0 && ((o.rounds as number) || 0) >= mr2
+            sealThink(steps)
+            patchA({
+              text: (o.text as string) || acc,
+              think: think || undefined,
+              trace: trace.slice(),
+              steps: cloneSteps(steps),
+              pending: (o.pending as Pending) || null,
+              ask: (o.ask as Ask) || null,
+              /* 续跑这条路原来也漏了 card：捡回来的那半截活干完给了卡片，
+                 屏幕上照样一颗按钮都没有。两条路必须同时补，否则「按继续」又是空的。 */
+              card: (o.card as Card) || null,
+              meta: {
+                provider: o.provider as string, model: o.model as string,
+                rounds: o.rounds as number, max_rounds: mr2,
+                usage: (o.usage as Usage) || null,
+                ctx: (o.ctx as CtxInfo) || null,
+              },
+            })
+            if (!o.ok) setErr((o.error as string) || '没回话')
+          } else if (kind === 'err') setErr((o.error as string) || '出错了')
+        },
+      })
       if (!ended) setErr('连接断了，这句没答完')
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') {
@@ -1769,6 +1624,18 @@ export function Chat({
   /* 外部（左栏「新会话」按钮）通过 window 事件触发这里的开新会话。
      为什么不重挂载：重挂载会让它经历 empty→非空 的一次跳变，
      输入框从中间「先往上、再往下」抽搐一下。所以只切会话，不重建组件。 */
+  /* 气泡里答完的答案从这里进来（D21 在别的页面也能答）。
+     走的是**同一个 send**，不另造一条发送路径 —— 两套必然长歪。 */
+  useEffect(() => {
+    const h = (ev: Event) => {
+      const t = String((ev as CustomEvent).detail?.text || '').trim()
+      if (t) send(t)
+    }
+    window.addEventListener('sd:answer', h as EventListener)
+    return () => window.removeEventListener('sd:answer', h as EventListener)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => {
     /* 只清视图、**不新建**：会话由调用方（左栏「新会话」）建好并切好指针。
        这里再调 newSession() 的话，一次点击会冒出两条会话（这条 bug 出现过）。 */
