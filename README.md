@@ -61,6 +61,22 @@ F:\项目\备考专升本\_bak-src-1105-1740\             ← 纯源码
 F:\项目\备考专升本\_bak-1105-1500\                 ← 含数据库一致性快照
 ```
 
+## 回归测试
+
+```bash
+python regress.py        # 一键回归：语法/模块/接口/记忆/模型/只读闸/日志/构建，26 项
+```
+
+另有两份工作区隔离探针在本机 `tests/`（该目录按 `.gitignore` 不入库）：
+
+```bash
+node tests/probe_ws_isolation.mjs   # 8 项
+node tests/probe_ws_full.mjs        # 30 项
+```
+
+跑之前确保 `python -m server.main` 起着。`regress.py` 不写脏数据
+（唯一会写的验证走计划模式，必被只读闸挡住）。
+
 ## 许可
 
 个人项目，仅限学习交流使用。
