@@ -34,6 +34,9 @@ from . import store
 
 # 权重存在 kv 里，重启不丢；没训过就是 None
 _W_KEY = "judge.model.v1"
+# 第一次训练（含合成样本）产出的权重**默认不接管决策**。
+# 训完只是存着给人看，要人明确 activate 才让 predict 真的用模型。
+_ACTIVE_KEY = "judge.model.active"
 _MIN_SAMPLES = 30            # 少于这个数不训 —— 30 条以下拟合出来的就是噪声
 
 # 特征名（顺序即权重顺序，别乱改；改了要把 kv 里的旧向量作废）
@@ -83,8 +86,13 @@ def _sigmoid(x):
 
 
 def _load():
-    """读已训练的模型。返回 None 表示还没有模型 —— 调用方必须据此回退规则版。"""
+    """读已训练的模型。返回 None 表示还没有模型 —— 调用方必须据此回退规则版。
+
+    训过但没 activate（第一次试跑）也返回 None —— 权重存着，但不让
+    合成数据训出来的东西直接排复习计划。"""
     try:
+        if str(store.kv_get(_ACTIVE_KEY) or "0") not in ("1", "true", "yes"):
+            return None
         raw = store.kv_get(_W_KEY)
         if not raw:
             return None
@@ -127,12 +135,25 @@ def status():
     con = store.connect()
     try:
         n = con.execute("SELECT COUNT(*) c FROM training_samples").fetchone()["c"]
+        syn = con.execute("SELECT COUNT(*) c FROM training_samples WHERE model_src='synthetic'").fetchone()["c"]
+        real = con.execute("SELECT COUNT(*) c FROM training_samples WHERE model_src='real'").fetchone()["c"]
     finally:
         con.close()
+    # 模型文件存在但没 activate = 第一次试跑，权重只存档不生效
+    try:
+        has_file = bool(store.kv_get(_W_KEY))
+        active = str(store.kv_get(_ACTIVE_KEY) or "0") in ("1", "true", "yes")
+    except Exception:
+        has_file, active = False, False
     return {
         "trained": m is not None,
+        "has_file": has_file,
+        "active": active,
+        "pending_activation": has_file and not active,
         "src": "model" if m else "rule",
         "samples": n,
+        "real_samples": real,
+        "synthetic_samples": syn,
         "min_samples": _MIN_SAMPLES,
         "ready": n >= _MIN_SAMPLES,
         "trained_at": (m or {}).get("at"),
@@ -246,3 +267,19 @@ def handle_status():
 def handle_reset():
     """judge_reset：训错了能退回来。"""
     return reset()
+
+
+def activate(on=True):
+    """让人明确决定：要不要让训练出来的模型真的接管判分。
+
+    第一次训练（含合成样本）之后是 pending_activation 状态，
+    权重存着、界面能看，但 predict 仍走规则。要看过权重和来源分布，
+    再决定是否 activate。随时能 deactivate 退回规则版。
+    """
+    store.kv_set(_ACTIVE_KEY, "1" if on else "0")
+    return {"ok": True, "active": bool(on),
+            "say": "模型已接管判分" if on else "已退回规则估分"}
+
+
+def handle_activate(on=True):
+    return activate(on)

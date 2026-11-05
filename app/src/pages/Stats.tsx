@@ -69,6 +69,8 @@ export function Stats({ base }: { base: Base }) {
   const jd = useTool<{
     trained: boolean; src: string; samples: number
     min_samples: number; ready: boolean
+    has_file?: boolean; active?: boolean; pending_activation?: boolean
+    real_samples?: number; synthetic_samples?: number
   }>('judge_status')
   /* 可讲率要全量扫题库（实测 1.1 秒）—— 不能让它堵住上面那排数字，
      所以晚一步再挂。扫之前那一行摆占位，不假装它不存在。 */
@@ -300,10 +302,17 @@ export function Stats({ base }: { base: Base }) {
               <div className="ma-src">
                 <span className={jd.data?.trained ? 'on' : ''}>
                   {jd.loading ? '读模型状态…' : jd.data?.trained
-                    ? '自建模型判分' : '规则估分（模型还没训）'}
+                    ? '自建模型判分'
+                    : jd.data?.pending_activation
+                      ? '已训练 · 待激活（合成样本，未接管）'
+                      : '规则估分（模型还没训）'}
                 </span>
                 <span>
-                  {jd.data ? `样本 ${jd.data.samples} / ${jd.data.min_samples}` : ''}
+                  {jd.data
+                    ? `样本 ${jd.data.samples} / ${jd.data.min_samples}`
+                        + (jd.data.real_samples != null
+                          ? `（真 ${jd.data.real_samples} · 合成 ${jd.data.synthetic_samples ?? 0}）` : '')
+                    : ''}
                 </span>
               </div>
 
