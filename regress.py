@@ -101,7 +101,7 @@ def main():
     try:
         sys.path.insert(0, ".")
         from server import tools as T, agent, memories, mastery, judge, layers, extract, embed, silent, prompts
-        ok(len(T.REGISTRY) == 208, "工具注册表 208 个", len(T.REGISTRY))
+        ok(len(T.REGISTRY) >= 208, "工具注册表 ≥208 个", len(T.REGISTRY))
         ok(len(prompts.SYS) == 6475, "SYS 提示词完整", len(prompts.SYS))
         ok("%CATALOG%" in prompts.SYS, "CATALOG 占位符在")
         # 惰性代理：agent.xxx 访问要能拿到真实模块
@@ -134,7 +134,15 @@ def main():
         m = get("/api/mastery")
         ok(m.get("ok") is True, "mastery 200")
         # 按天调度：新条目第一次答对应该排「明天」
-        ok(judge.status().get("ready") is False, "样本不足时不假装训练好了")
+        # 2026-11-06：已用「真10 + 合成22」跑过第一次训练，样本 32 条。
+        # 断言改成检查**激活闸**：训过但没 activate 时 predict 必须仍走规则，
+        # 防止合成数据训出来的权重直接排复习计划。
+        st = judge.status()
+        ok(st.get("has_file") is True, "第一次训练权重已存档")
+        ok(st.get("active") is False, "默认未激活（合成样本不自动接管）")
+        ok(st.get("src") == "rule", "未激活时 predict 仍走规则")
+        ok(st.get("real_samples") == 10 and st.get("synthetic_samples") == 22,
+           "来源分布如实标注（真10/合成22）", st)
     except Exception as e:
         ok(False, "判断模型接口", str(e))
 

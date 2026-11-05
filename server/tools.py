@@ -6204,7 +6204,7 @@ CATS = [
      ["记忆", "他之前说过", "还记得", "我的目标", "我的弱项", "作息", "偏好",
       "答错", "答对", "做了题", "记录作答", "熟练度", "掌握",
       "他喜欢", "他习惯", "以前说过", "别重复问", "记住我"],
-     ["mastery_record", "mastery_list", "judge_train", "judge_status", "judge_reset",
+     ["mastery_record", "mastery_list", "judge_train", "judge_status", "judge_reset", "judge_activate",
       "memory_recall", "memory_add", "memory_correct", "memory_search", "memory_list", "memory_drop"]),
 ]
 
@@ -6436,6 +6436,15 @@ def t_judge_train(**_):
 def t_judge_status(**_):
     from . import judge as _j
     return _j.handle_status()
+
+
+@tool("judge_activate", config.PERM_CONFIRM,
+      "让训练好的模型真的接管判分（第一次训练默认只存档不生效）")
+def t_judge_activate(on=True, **_):
+    """第一次训练含合成样本，默认 pending_activation。
+    人看过权重和来源分布再决定是否激活；随时能关回去。"""
+    from . import judge as _j
+    return _j.handle_activate(on)
 
 
 @tool("judge_reset", config.PERM_CONFIRM,
