@@ -1,0 +1,386 @@
+/* ============================================================
+   haloflux · 光环页（D28/D29）
+
+   **整屏控制台**，跟官方 lab.html 同一个骨架：
+     .hfx-top      KPI 带（一排数字，底部有一条细线）
+     .hfx-stage    光环舞台（环切出画面，只露内弧）
+     .hfx-panels   底部 8 块面板（官方 .panels 的 4 列 × 2 行）
+
+   这一页不吃 Shell（App.tsx 里走独立分支）—— 官方就是整屏的，
+   套进左栏 56px + 顶栏 48px 里，环永远铺不满，一眼就不对。
+
+   配色跟主界面同源：纯黑底、1px 细线分层、不靠阴影。
+   密度按官方来：字号 9~11px，信息密集但不糊。
+   ============================================================ */
+
+.hfx {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100vh;
+  height: 100dvh;
+  background: #000;
+  color: var(--tx);
+  overflow: hidden;
+}
+
+/* ---------------- header：KPI 带 ---------------- */
+.hfx-top {
+  display: grid;
+  grid-template-columns: minmax(200px, 1.5fr) repeat(5, minmax(0, 1fr));
+  align-items: end;
+  padding: 10px 18px 0;
+  border-bottom: 1px solid var(--line);
+  background: #000;
+}
+.hfx-brand { display: flex; align-items: center; gap: 10px; padding-bottom: 8px; min-width: 0; }
+.hfx-brand-tx { min-width: 0; }
+.hfx-brand h1 em {
+  font-style: normal;
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: var(--tx3);
+  margin-left: 6px;
+  font-weight: 600;
+}
+.hfx-back {
+  width: 26px; height: 26px;
+  border: 1px solid var(--line2);
+  border-radius: var(--r1);
+  background: transparent;
+  color: var(--tx2);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  flex: none;
+}
+.hfx-back:hover { color: var(--act); border-color: var(--act); }
+.hfx-brand h1 {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  color: var(--tx);
+  white-space: nowrap;
+}
+.hfx-brand p { margin: 2px 0 0; font-size: 9px; letter-spacing: .6px; color: var(--tx3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.hfx-kpi { padding: 0 10px 8px; position: relative; }
+.hfx-kpi .k { font-size: 9px; color: var(--tx3); letter-spacing: 1.1px; }
+.hfx-kpi .v {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--tx);
+}
+.hfx-kpi .v.hot { color: var(--act); }
+.hfx-kpi .seg {
+  position: absolute;
+  left: 10px; right: 0; bottom: -1px;
+  height: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.hfx-kpi .seg i { display: block; height: 100%; width: 0; background: var(--tx2); animation: hfseg 3.2s ease-in-out infinite; }
+@keyframes hfseg { 0%, 100% { width: 22%; } 50% { width: 78%; } }
+
+/* ---------------- stage：光环 ---------------- */
+.hfx-stage {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  background: #000;
+}
+.hfx-cv {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%; display: block;
+  transition: opacity .5s var(--ease);
+}
+.hfx-cv.off { opacity: 0; pointer-events: none; }
+.hfx-scan {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, .26) 0 1px, transparent 1px 3px);
+}
+
+.hfx-modes { position: absolute; top: 10px; right: 14px; display: flex; gap: 4px; z-index: 3; }
+.hfx-modes button {
+  padding: 3px 9px;
+  border: 1px solid var(--line2);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, .78);
+  color: var(--tx2);
+  font-size: 10px;
+  letter-spacing: .5px;
+  cursor: pointer;
+  transition: color .18s, border-color .18s, background .18s;
+}
+.hfx-modes button:hover { color: var(--tx); border-color: var(--tx3); }
+.hfx-modes button.on { background: var(--act); border-color: var(--act); color: var(--onact); font-weight: 700; }
+
+.hfx-status { position: absolute; right: 16px; bottom: 10px; text-align: right; z-index: 3; pointer-events: none; }
+.hfx-status b { display: block; font-family: var(--mono); font-size: 11px; font-weight: 800; color: var(--tx); }
+.hfx-status span { font-size: 9px; color: var(--tx3); }
+
+/* 点中的记忆：浮在舞台右下（官方 .chk 小卡的位置） */
+.hfx-mem {
+  position: absolute;
+  right: 16px; bottom: 46px;
+  z-index: 4;
+  max-width: 280px;
+  padding: 8px 10px;
+  border: 1px solid var(--line2);
+  background: rgba(0, 0, 0, .9);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hfx-mem-k {
+  font-size: 8px;
+  letter-spacing: 1px;
+  font-weight: 700;
+  color: #000;
+  padding: 1px 6px;
+  border-radius: var(--rp);
+  align-self: flex-start;
+}
+.hfx-mem-k.k-pref { background: var(--act); }
+.hfx-mem-k.k-fact { background: var(--en); }
+.hfx-mem-k.k-difficulty { background: var(--bad); }
+.hfx-mem-k.k-goal { background: var(--pol); }
+.hfx-mem-k.k-change { background: var(--cs); }
+.hfx-mem span { font-size: 12px; line-height: 1.5; color: var(--tx); }
+.hfx-mem i { font-style: normal; font-family: var(--mono); font-size: 9px; color: var(--tx3); }
+
+.hfx-err {
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+  z-index: 5; padding: 5px 11px;
+  border: 1px solid var(--bad); background: rgba(0, 0, 0, .92);
+  color: var(--bad); font-size: 11px;
+}
+
+/* ---------------- panels：底部 8 块 ---------------- */
+.hfx-panels {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--line);
+  background: #000;
+}
+@media (max-width: 1100px) {
+  .hfx-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .hfx-panels { grid-template-columns: minmax(0, 1fr); }
+}
+
+.hf-p {
+  display: flex;
+  flex-direction: column;
+  /* 面板高度压低一档：舞台才是主角。原来 16vh 把 873 高的屏吃掉 140，
+     舞台只剩 504 —— 记忆场的五条泳道就挤成一团了。 */
+  height: clamp(96px, 13.5vh, 132px);
+  min-width: 0;
+  padding: 6px 9px 5px;
+  border: 1px solid var(--line);
+  background: #000;
+  overflow: hidden;
+}
+.hf-p h3 {
+  margin: 0 0 5px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  color: var(--tx);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hf-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.hf-cv { width: 100%; flex: 1; min-height: 0; display: block; }
+.hf-cap {
+  margin-top: auto;
+  padding-top: 3px;
+  font-size: 8px;
+  color: var(--tx3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 1 · 调查流水 */
+.hfx-feed {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; justify-content: flex-end;
+  font-size: 9px; line-height: 1.45;
+  overflow: hidden;
+  font-family: var(--mono);
+}
+.hfx-feed div { white-space: nowrap; color: var(--tx3); overflow: hidden; text-overflow: ellipsis; }
+.hfx-feed div.last { color: var(--tx); font-weight: 600; }
+.hfx-feed .n { color: var(--tx3); margin-right: 8px; opacity: .55; }
+.hfx-feed .vb { display: inline-block; width: 38px; font-weight: 800; }
+.hfx-feed .vb.build { color: var(--act); }
+.hfx-feed .vb.check { color: var(--tx2); }
+.hfx-feed .vb.read { color: var(--en); }
+.hfx-feed .vb.qa { color: var(--tx); }
+.hfx-dim { color: var(--tx3); font-size: 10px; }
+
+/* 3 · 方法工作区 */
+.hfx-code {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; justify-content: flex-end;
+  font-size: 9px; line-height: 1.5;
+  font-family: var(--mono);
+  overflow: hidden;
+}
+.hfx-code div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hfx-code .ln { color: var(--tx3); margin-right: 9px; opacity: .55; }
+.hfx-code .fn { color: var(--tx); font-weight: 700; }
+.hfx-code .op { color: var(--tx3); }
+.caret {
+  display: inline-block; width: 6px; height: 10px;
+  background: var(--tx); vertical-align: -1px;
+  animation: hfbl 1s steps(1) infinite;
+}
+@keyframes hfbl { 50% { opacity: 0; } }
+
+/* 5 · 来源路线 */
+.hfx-routes {
+  display: grid;
+  grid-template-columns: 1.3fr repeat(3, 1fr);
+  gap: 3px 6px;
+  font-size: 8px;
+  align-content: start;
+}
+.hfx-routes .h { color: var(--tx3); font-weight: 800; letter-spacing: 1px; }
+.hfx-routes .nm { color: var(--tx2); white-space: nowrap; overflow: hidden; }
+.chip {
+  display: inline-block;
+  width: 100%;
+  height: 11px;
+  border: 1px solid var(--line2);
+  border-radius: 2px;
+  transition: all .3s;
+}
+.chip.on { background: var(--tx); border-color: var(--tx); }
+.chip.done { background: var(--card3); border-color: var(--card3); }
+
+/* 7 · 子智能体 */
+.hfx-agents {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 12px;
+  font-size: 8px;
+  align-content: start;
+}
+.ag { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.ag .id { color: var(--tx3); opacity: .6; }
+.ag .rl { width: 14px; color: var(--tx2); font-weight: 600; }
+.ag .cells { display: flex; gap: 1px; }
+.ag .cells i { width: 6px; height: 7px; background: var(--card2); }
+.ag .cells i.on { background: var(--en); }
+.ag .cells i.cur { background: var(--line2); }
+.ag .st { color: var(--tx3); overflow: hidden; }
+.ag .st.w { color: var(--tx); }
+
+
+/* ---------------- 记忆场（第二副面孔） ----------------
+   独立一层画布，叠在光环上面：光环继续在底下呼吸，记忆场浮在上面。
+   两者不是替换关系而是叠加关系 —— 这就是「一台机器的两个面」。 */
+.hfx-mem-cv {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .5s var(--ease);
+}
+.hfx-mem-cv.on { opacity: 1; pointer-events: auto; cursor: crosshair; }
+
+/* 抬头固定在左上角。它底下是记忆场 —— 所以记忆场的绘制区要避开这块，
+   不能让第一行钻到文字下面（实测压在一起，两行字互相看不清）。 */
+.hfx-memhead {
+  position: absolute;
+  left: 18px; top: 10px;
+  z-index: 3;
+  pointer-events: none;
+  max-width: 62%;
+}
+.hfx-memhead b {
+  display: block;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--tx);
+}
+.hfx-memhead span {
+  display: block;
+  margin-top: 3px;
+  font-size: 9px;
+  line-height: 1.6;
+  color: var(--tx3);
+}
+
+/* 右下那块面板里的五类分布条 */
+.hfx-lanes { display: flex; flex-direction: column; gap: 3px; justify-content: center; height: 100%; }
+.hfx-lanes .ln-row {
+  display: grid;
+  grid-template-columns: 8px 34px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+}
+.hfx-lanes .lb { color: var(--tx2); }
+.hfx-lanes .nu { color: var(--tx3); text-align: right; font-variant-numeric: tabular-nums; }
+.hfx-lanes .tr { height: 3px; background: var(--card3); border-radius: 2px; overflow: hidden; }
+.hfx-lanes .tr i { display: block; height: 100%; border-radius: 2px; background: var(--tx2); }
+
+.dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex: none; }
+.dot.k-pref, .hfx-lanes .tr i.k-pref { background: var(--act); }
+.dot.k-fact, .hfx-lanes .tr i.k-fact { background: var(--en); }
+.dot.k-difficulty, .hfx-lanes .tr i.k-difficulty { background: var(--bad); }
+.dot.k-goal, .hfx-lanes .tr i.k-goal { background: var(--pol); }
+.dot.k-change, .hfx-lanes .tr i.k-change { background: var(--cs); }
+
+
+/* ---- 三层分布条（记忆场抬头） ----
+   为什么要有它：这一版最该被看见的信息就是「哪些事每轮都在它脑子里」。
+   常驻 / 近期 / 归档 三段按真实条数分配宽度，一眼看出比例。 */
+.hfx-lay {
+  display: flex;
+  gap: 3px;
+  margin-top: 7px;
+  max-width: 460px;
+}
+.hfx-lay i {
+  font-style: normal;
+  font-size: 8px;
+  letter-spacing: .5px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-radius: 2px;
+}
+.hfx-lay .lay-core { background: var(--tx); color: #000; font-weight: 700; }
+.hfx-lay .lay-recall { background: var(--card3); color: var(--tx2); }
+.hfx-lay .lay-arch { background: var(--card); color: var(--tx3); border: 1px solid var(--line); }
+
+/* ---- 记忆系统面板 ---- */
+.hfx-sys { display: flex; flex-direction: column; gap: 3px; font-size: 9px; height: 100%; justify-content: center; }
+.hfx-sys .ln { display: flex; justify-content: space-between; color: var(--tx2); }
+.hfx-sys .ln b { font-family: var(--mono); font-weight: 800; color: var(--tx); font-variant-numeric: tabular-nums; }
+.hfx-sys .vs {
+  display: flex; justify-content: space-between;
+  margin-top: 4px; padding-top: 4px;
+  border-top: 1px solid var(--line);
+  color: var(--tx3);
+}
+.hfx-sys .vf { font-family: var(--mono); color: var(--tx2); }
+.hfx-sys .vbar { height: 3px; background: var(--card3); border-radius: 2px; overflow: hidden; }
+.hfx-sys .vbar i { display: block; height: 100%; background: var(--en); border-radius: 2px; }
