@@ -11,7 +11,7 @@ import { PALETTE_TOKENS } from './halo/tokens'
    haloflux · 光环（第 10 章 D28/D29）
 
    整屏控制台，三行铺满（跟官方 lab.html 同一个骨架）：
-     header  KPI 带（左边是**研学台的品牌** —— 这一页是这个项目的一部分）
+     header  KPI 带（左边是**衡文点墨 HARNESS 的品牌** —— 这一页是这个项目的一部分）
      stage   舞台（运行时：光环 / 记忆：记忆场）
      panels  底部 8 块面板
 
@@ -176,7 +176,7 @@ export function Haloflux({ onExit }: { onExit?: () => void }) {
           <button className="hfx-back" onClick={onExit} title="回到工作区">←</button>
           <Logo size={22} tone="white" />
           <div className="hfx-brand-tx">
-            <h1>研学台 <em>HALOFLUX</em></h1>
+            <h1>衡文点墨 <em>HARNESS</em></h1>
             <p>记忆 · 运行时 · 子智能体 —— 本项目的一个面</p>
           </div>
         </div>
