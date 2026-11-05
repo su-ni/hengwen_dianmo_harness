@@ -17,10 +17,30 @@ import threading
 import time
 import uuid
 
-from . import (agent, asr, bcz, bili, config, context, datahub, decider, evidence, explain,
+from . import (asr, bcz, bili, config, context, datahub, decider, evidence, explain,
                fsops, intake, intent, kb, model_router, notesrc, perm, planner,
                platform_ai, store, streamer, websearch, writing, xmind)
 from . import silent as _silent
+
+# ---- 断开 tools ↔ agent 的模块级循环依赖 ----
+# 原来顶层 `from . import agent`，而 agent.py 顶层又 `from . import tools`，
+# 两边靠「部分初始化」侥幸运行 —— 换 import 顺序或加模块级求值就会炸。
+# 这里用一个**惰性代理对象**：模块加载时不 import agent，
+# 直到第一次真的访问 agent.xxx 才加载。函数体里的裸名 `agent.turn(...)`
+# 走 globals 查到的是这个代理，所以 21 处调用点一行都不用改。
+class _LazyAgent:
+    """PEP 562 的 __getattr__ 对模块内裸名查找无效，所以这里用对象代理。"""
+    _mod = None
+
+    def __getattr__(self, name):
+        if _LazyAgent._mod is None:
+            from . import agent as _a
+            _LazyAgent._mod = _a
+        return getattr(_LazyAgent._mod, name)
+
+
+agent = _LazyAgent()
+
 
 REGISTRY = {}
 
