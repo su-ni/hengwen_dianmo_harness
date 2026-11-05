@@ -33,6 +33,21 @@ type ExCov = {
   by_source: Record<string, Record<string, number>>
   note?: string
 }
+/* 熟练度（第 11 章 D33–D37）：跨科目的掌握度。
+   为什么要在统计页而不是单独开一页：它跟"讲次/词/作答"是同一类东西 ——
+   都是"这台机器上到底学成什么样"。
+   单开一页会变成"又一个没人点的页面"。 */
+type MaRow = {
+  item_id: string; kind: string | null; score: number | null
+  reason: string | null; subject: string | null
+}
+type MaStat = {
+  total: number; avg_score: number; samples: number; due: number
+  by_kind: Record<string, number>
+  buckets: number[]          // 五档：0-20% / 20-40% / 40-60% / 60-80% / 80-100%
+  weak: MaRow[]
+  top: { item_id: string; kind: string | null; score: number | null }[]
+}
 type SubRow = {
   id: string; name: string; score: number | null; cls: string
   lessons_done: number; lessons_total: number
@@ -48,6 +63,13 @@ export function Stats({ base }: { base: Base }) {
   const cal = useTool<Cal>('checkin_calendar')
   const subs = useTool<{ subjects: SubRow[] }>('list_subjects')
   const exs = useTool<ExStats>('explain_stats')
+  // 熟练度：跨科目，所以不跟随当前科目
+  const ma = useTool<MaStat>('mastery_list')
+  // 判断模型状态：这个数是模型判的还是规则估的，得让人知道
+  const jd = useTool<{
+    trained: boolean; src: string; samples: number
+    min_samples: number; ready: boolean
+  }>('judge_status')
   /* 可讲率要全量扫题库（实测 1.1 秒）—— 不能让它堵住上面那排数字，
      所以晚一步再挂。扫之前那一行摆占位，不假装它不存在。 */
   const [covReady, setCovReady] = useState(false)
@@ -58,6 +80,8 @@ export function Stats({ base }: { base: Base }) {
 
   const lessons = d?.lessons ?? { done: 0, total: 0 }
   const words = d?.words ?? { in_memory: 0, due_today: 0, total: 0, boxes: {} }
+  /* 任何「几个数相加」的地方都先过它：没回来算 0，不把 NaN 漏到界面上 */
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
   /* 真题可判分题数：以前这里写死 995，实际题库比它多/少都对不上。
      现在读 stats_overview 回的真数（题源自报的 total），查不到就显示「—」。 */
   const examN = (d as any)?.exam_bank_total ?? 0
@@ -68,8 +92,16 @@ export function Stats({ base }: { base: Base }) {
   const boxMax = Math.max(1, ...Object.values(boxes).map(Number))
   const cardTotal = (d?.point_cards || []).reduce((a, x) => a + (x.count || 0), 0)
   const timeTotal = d?.time?.total ?? 0
-  const lessonPct = lessons.total ? (lessons.done / lessons.total) * 100 : 0
-  const wordPct = words.total ? (words.in_memory / words.total) * 100 : 0
+  /* 百分比一律过一道 clamp：分母为 0 时上面已经给 0，但接口半路回来时
+     done/total 里可能混进 undefined，算出来是 NaN —— React 会把 NaN
+     原样写进 style，控制台一条警告，进度条宽度悄悄失效。
+     宁可停在 0，也不要一条看起来很短的条其实是「没算出来」。 */
+  const pct = (a: number, b: number) => {
+    const v = b ? (a / b) * 100 : 0
+    return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 0
+  }
+  const lessonPct = pct(lessons.done, lessons.total)
+  const wordPct = pct(words.in_memory, words.total)
 
   // 最近 70 天，按真实记录填，没记录就是空格子 —— 不做「连续 99 天」的美化图
   const days: string[] = []
@@ -113,8 +145,12 @@ export function Stats({ base }: { base: Base }) {
           <div className="v">{ans.answered}<small>题</small></div>
           <div className="s">
             {ans.answered
+              /* accuracy 可能是 null（一道都没判过）。直接 {ans.accuracy}% 会渲染成
+                 「null%」，React 还会为它报一条 NaN 警告 —— 没算出来就明说没算出来。 */
               ? <>对 {ans.right} · 错 {ans.wrong} · 正确率{' '}
-                <b style={{ color: (ans.accuracy ?? 0) < 50 ? 'var(--bad)' : 'var(--ok)' }}>{ans.accuracy}%</b></>
+                <b style={{ color: (ans.accuracy ?? 0) < 50 ? 'var(--bad)' : 'var(--ok)' }}>
+                  {ans.accuracy == null ? '—' : ans.accuracy + '%'}
+                </b></>
               : '还没做过题'}
           </div>
         </Kpi>
@@ -246,10 +282,83 @@ export function Stats({ base }: { base: Base }) {
               : '还没有计时记录。'}
           </div>
         </Card>
+
+
+        {/* ---- 熟练度（第 11 章 D33–D37）----
+            它回答的是「到底会不会」，跟上面的「讲了几讲 / 背了多少词」是两个维度：
+            前者是投入，后者是产出。只看投入会让人以为学了很多，
+            而熟练度才是"考场上能不能写出来"的那个数。 */}
+        <Card title="熟练度" note={ma.data ? `${ma.data.total} 项 · 训练样本 ${ma.data.samples} 条` : '跨科目'}>
+          {ma.loading && !ma.data ? <Skel n={3} /> : null}
+          {ma.err ? <Empty title={`熟练度读不出来：${ma.err}`} /> : null}
+          {ma.data && ma.data.total === 0 ? (
+            <Empty title="还没有作答记录 —— 做几道题或背几个词，这里就会有数" />
+          ) : null}
+          {ma.data && ma.data.total > 0 ? (
+            <>
+              {/* 判断模型状态：不假装用了模型 */}
+              <div className="ma-src">
+                <span className={jd.data?.trained ? 'on' : ''}>
+                  {jd.loading ? '读模型状态…' : jd.data?.trained
+                    ? '自建模型判分' : '规则估分（模型还没训）'}
+                </span>
+                <span>
+                  {jd.data ? `样本 ${jd.data.samples} / ${jd.data.min_samples}` : ''}
+                </span>
+              </div>
+
+              {/* 平均分 + 到期数：两个一眼能读的数 */}
+              <div className="ma-top">
+                <div className="ma-big">
+                  <b>{Math.round((ma.data.avg_score ?? 0) * 100)}</b>
+                  <span>平均掌握度</span>
+                </div>
+                <div className="ma-big">
+                  <b className={ma.data.due > 0 ? 'hot' : ''}>{ma.data.due}</b>
+                  <span>今天该复习</span>
+                </div>
+              </div>
+
+              {/* 五档分布：比一个平均分有用 —— 平均 60 分可能是"都不错"也可能是"一半会一半不会" */}
+              <div className="ma-dist">
+                {ma.data.buckets.map((n, i) => {
+                  const pct = ma.data!.total ? (n / ma.data!.total) * 100 : 0
+                  const label = ['0-20%', '20-40%', '40-60%', '60-80%', '80-100%'][i]
+                  return (
+                    <div className="ma-bar" key={i} title={`${label}：${n} 项`}>
+                      <i style={{ height: `${Math.max(4, pct)}%`, background: i < 2 ? 'var(--bad)' : i < 3 ? 'var(--act)' : 'var(--ok)' }} />
+                      <span>{n}</span>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* 最薄的几条：界面要直接告诉人"该补哪里"，不是让他自己找 */}
+              {ma.data.weak.length ? (
+                <div className="ma-weak">
+                  <div className="ma-h">最不牢的</div>
+                  {ma.data.weak.slice(0, 5).map((w) => (
+                    <div className="ma-row" key={w.item_id}>
+                      <span className="ma-n">{w.item_id}</span>
+                      <span className="ma-s">{Math.round((w.score ?? 0) * 100)}</span>
+                      <span className="ma-r">{w.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="ma-ok">没有明显薄的项</div>
+              )}
+            </>
+          ) : null}
+        </Card>
       </div>
 
+      {/* 四个数相加，任何一个没回来就是 NaN 串到屏幕上。
+         /api/base 还没到（d 为空）时 words 有兜底，但 d.bank / examN / cardTotal
+         各有各的就绪时机 —— 所以相加前统一过一道 num()，缺的按 0 算，
+         显示层再决定要不要写「—」。宁可在界面上少一个数，不要一个 NaN。 */}
       <div className="note-mn">
-        本机家底合计 <b style={{ color: 'var(--tx2)' }}>{words.total + (d?.bank?.total ?? 0) + examN + cardTotal}</b> 条
+        本机家底合计 <b style={{ color: 'var(--tx2)' }}>{num(words.total) + num(d?.bank?.total) + num(examN) + num(cardTotal)}</b> 条
         （词 {words.total} + 语法 {d?.bank?.total ?? 0} + 真题 {examN || '—'} + 考点卡 {cardTotal}）。
         {booksN > words.total ? `　另有 ${books.length - 1} 本词书共 ${booksN} 词。` : ''}
       </div>

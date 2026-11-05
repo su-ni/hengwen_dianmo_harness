@@ -21,7 +21,9 @@ const MODE_KEY = 'sd.react.today.mode'
 type Go = (p: PageKey, o?: { sid?: string }) => void
 
 function Cards({ go }: { go: Go }) {
-  const plan = useTool<{ rows: PlanRow[]; rule: string; due_today: number; note?: string }>('plan_today')
+  // mastery_rows：工作区没挂科目时，服务端用这个不被工作区过滤的字段
+  // 把熟练度驱动的待办带出来（rows 会被 _ws_filter 清空）。
+  const plan = useTool<{ rows: PlanRow[]; mastery_rows?: PlanRow[]; rule: string; due_today: number; note?: string }>('plan_today')
   const st = useTool<{
     lessons: { done: number; total: number }
     words: { in_memory: number; total: number; due_today: number }
@@ -30,7 +32,7 @@ function Cards({ go }: { go: Go }) {
     time: { total: number; today: number }
   }>('stats_overview')
 
-  const rows = plan.data?.rows ?? []
+  const rows = plan.data?.rows?.length ? plan.data.rows : (plan.data?.mastery_rows ?? [])
   const first = rows[0]
   const d = st.data
   const mins = d?.time?.today ?? 0
