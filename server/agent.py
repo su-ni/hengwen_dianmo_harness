@@ -2562,7 +2562,7 @@ def _parse_dsml(say):
     if not say or "DSML" not in say:
         return None
     items = []
-    for act, body in _DSML_INVOKE.findall(say):
+    for invoke_name, body in _DSML_INVOKE.findall(say):
         kv = {}
         for pname, is_str, pval in _DSML_PARAM.findall(body):
             v = pval.strip()
@@ -2572,20 +2572,31 @@ def _parse_dsml(say):
                 except Exception as _e:
                     _silent.log_squash(__name__, _e)
             kv[pname] = v
-        if kv.get("tool"):
-            items.append((act.lower(), kv))
+        # 两种写法都要吃：
+        #   老写法  invoke name="call"  + parameter name="tool" → 工具名在参数里
+        #   新写法  invoke name="memory_recall" + parameter q/k → 工具名在 invoke 的 name 上
+        # 实测踩过：上游换成第二种后，kv 里没有 tool，items 为空，
+        # 整段 <｜｜DSML｜｜> 标签**直接显示在页面上**，工具一次没调、也没回答。
+        # 这是最坏的一类失败：看着像回了，其实卡死。
+        tool = kv.get("tool") or invoke_name
+        if not tool:
+            continue
+        act = (kv.get("action") or "call").strip().lower()
+        args = kv.get("args")
+        if not isinstance(args, dict):
+            # 新写法把 q / k 这类参数直接摊在 invoke 里，没有包一层 args
+            args = {k: v for k, v in kv.items()
+                    if k not in ("tool", "action", "args")}
+        items.append((act, tool, args))
     if not items:
         return None
     if len(items) == 1:
-        act, kv = items[0]
+        act, tool, args = items[0]
         if act not in ("call", "ask", "find_tool", "catalog", "propose"):
             act = "call"
-        return {"action": act, "tool": kv.get("tool"),
-                "args": kv.get("args") if isinstance(kv.get("args"), dict) else {}}
+        return {"action": act, "tool": tool, "args": args}
     return {"action": "calls",
-            "list": [{"tool": kv.get("tool"),
-                      "args": kv.get("args") if isinstance(kv.get("args"), dict) else {}}
-                     for _, kv in items]}
+            "list": [{"tool": tool, "args": args} for _, tool, args in items]}
 
 
 def _parse_action(say):
