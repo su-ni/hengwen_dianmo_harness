@@ -3983,3 +3983,113 @@ select.inp-mn:disabled { opacity: .4; cursor: default; }
 .lbox-strip button:hover { opacity: .9; }
 .lbox-strip button.on { opacity: 1; border-color: var(--act); }
 .lbox-strip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+
+/* ============================================================
+   熟练度卡片（统计页）· 第 11 章 D33–D37
+   ------------------------------------------------------------
+   跟同页其他卡片同一套语法：纯黑底、1px 线、不加阴影。
+   唯一的例外是中间那组柱子 —— 它要表达"分布"，那就得看得见高低。
+   ============================================================ */
+.ma-top {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 2px 0 12px;
+}
+.ma-big { display: flex; flex-direction: column; gap: 1px; }
+.ma-big b {
+  font-family: var(--mono);
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 800;
+  color: var(--tx);
+  font-variant-numeric: tabular-nums;
+}
+.ma-big b.hot { color: var(--act); }
+.ma-big span { font-size: 10px; color: var(--tx3); letter-spacing: .4px; }
+
+/* 五档分布柱：高度即占比。左两档红（不牢）、中间琥珀、右边绿（熟了） */
+.ma-dist {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  height: 56px;          /* 固定内高：柱子按百分比撑，不再按像素算 */
+  margin-bottom: 10px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--line);
+}
+.ma-bar {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 3px;
+  /* 柱子从底部长上来，所以容器要能压到 100% 高 */
+  min-width: 0;
+}
+.ma-bar i {
+  display: block;
+  width: 100%;
+  max-width: 40px;       /* 别让一根柱子横跨整列 —— 那看着像色块不像柱图 */
+  border-radius: 2px 2px 0 0;
+  opacity: .85;
+  min-height: 3px;       /* 某档为 0 时也看得出"这一档存在但没人" */
+  transition: height .35s var(--ease);
+}
+.ma-bar span { font-size: 9px; color: var(--tx3); font-variant-numeric: tabular-nums; flex: none; }
+
+.ma-h {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.1px;
+  color: var(--tx3);
+  text-transform: uppercase;
+  margin-bottom: 5px;
+}
+.ma-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 26px;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 0;
+  border-top: 1px solid var(--line);
+}
+.ma-n {
+  font-size: 12px;
+  color: var(--tx);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ma-s {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--bad);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ma-r {
+  grid-column: 1 / -1;
+  font-size: 9px;
+  color: var(--tx3);
+  line-height: 1.5;
+  margin-top: -2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ma-ok { font-size: 11px; color: var(--tx3); padding: 6px 0; }
+
+
+/* 判断模型状态条：不假装用了模型 */
+.ma-src {
+  display: flex; justify-content: space-between; gap: 8px;
+  font-size: 9px; color: var(--tx3);
+  padding-bottom: 8px; margin-bottom: 2px;
+  border-bottom: 1px solid var(--line);
+}
+.ma-src span:first-child.on { color: var(--ok); }
