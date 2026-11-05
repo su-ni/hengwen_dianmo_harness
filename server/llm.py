@@ -20,6 +20,7 @@ import json
 import re
 
 from . import config
+from . import silent as _silent
 
 try:
     import requests
@@ -104,8 +105,8 @@ def parse_json(text):
     if t.startswith("{") or t.startswith("["):
         try:
             return json.loads(t), None
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
     # 抠第一个完整的 {...}
     start = t.find("{")
     if start >= 0:

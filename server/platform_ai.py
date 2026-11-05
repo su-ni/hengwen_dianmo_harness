@@ -27,6 +27,7 @@ import re
 import time
 
 from . import config
+from . import silent as _silent
 
 try:
     import requests
@@ -76,8 +77,8 @@ def cred_dir():
     if not os.path.exists(d):
         try:
             os.makedirs(d, exist_ok=True)
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
     return d
 
 
@@ -121,23 +122,23 @@ def _aes_cbc(key, iv, data):
     try:
         from Crypto.Cipher import AES
         raw = AES.new(key, AES.MODE_CBC, iv).decrypt(data)
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     if raw is None:
         try:
             from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
             d = Cipher(algorithms.AES(key), modes.CBC(iv)).decryptor()
             raw = d.update(data) + d.finalize()
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
     if raw is None:
         raise RuntimeError("本机没有可用的 AES 实现（pycryptodome / cryptography 都没有）")
     try:
         n = raw[-1]
         if 1 <= n <= 16 and raw[-n:] == bytes([n]) * n:
             return raw[:-n]
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     return raw
 
 
@@ -678,8 +679,8 @@ def _wb_result(raw, model, reason):
             # 这里的耗时只是「解析这段 SSE」的时间，不含网络往返（拿不到），
             # 所以传 None：宁可不写速度，也不写一个错的。
             _stamp_usage("workbuddy", model, usage, t0=None)
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
         return {"ok": True, "text": body, "model": model, "reason": reason}
     if think:
         # 思考里已经想好了下一步要调什么 —— 那就当它说了，别浪费这一轮。
@@ -739,8 +740,8 @@ def _fix_route(provider, model):
                 if provider == "trae":
                     model_router.set_function(provider, config.TRAE_FUNCTION)
                 return fb, config.TRAE_FUNCTION, "model"
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     return None, None, None
 
 
@@ -799,8 +800,8 @@ def _stamp_usage(provider, model, usage, t0):
         out["cum_tokens"] = int(store.kv_get("usage.tokens") or 0)
         out["cum_prompt"] = int(store.kv_get("usage.prompt") or 0)
         out["cum_cache_read"] = int(store.kv_get("usage.cache_read") or 0)
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     LAST.clear()
     LAST.update(out)
     return out

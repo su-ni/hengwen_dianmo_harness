@@ -31,6 +31,7 @@ import urllib.parse
 import urllib.request
 
 from . import config, store
+from . import silent as _silent
 
 # ------------------------------------------------------------------ 常量
 ISSUER = "https://app.xmind.com"
@@ -119,8 +120,8 @@ def _save_token(d):
         with io.open(tmp, "w", encoding="utf-8") as f:
             f.write(raw)
         os.replace(tmp, TOKEN_FILE)
-    except OSError:
-        pass
+    except OSError as _e:
+        _silent.log_squash(__name__, _e)
     return d
 
 
@@ -129,8 +130,8 @@ def clear_token():
     try:
         if os.path.exists(TOKEN_FILE):
             os.remove(TOKEN_FILE)
-    except OSError:
-        pass
+    except OSError as _e:
+        _silent.log_squash(__name__, _e)
     global _session_id
     _session_id = None
 
@@ -184,8 +185,8 @@ def _save_pending():
         with io.open(tmp, "w", encoding="utf-8") as f:
             f.write(json.dumps(_PENDING, ensure_ascii=False))
         os.replace(tmp, _PENDING_FILE)
-    except OSError:
-        pass
+    except OSError as _e:
+        _silent.log_squash(__name__, _e)
 
 
 def start_login(open_browser=True):

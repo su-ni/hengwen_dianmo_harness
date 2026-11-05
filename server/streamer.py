@@ -27,6 +27,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from . import config
+from . import silent as _silent
 
 FFMPEG = os.environ.get("SD_FFMPEG") or "F:/ffmpeg/bin/ffmpeg.exe"
 Q_DEFAULT = 64
@@ -55,8 +56,8 @@ def ready(lesson_id, q=Q_DEFAULT):
             n = os.path.getsize(p)
             if n > 10240:
                 return p, n
-    except OSError:
-        pass
+    except OSError as _e:
+        _silent.log_squash(__name__, _e)
     return None, 0
 
 
@@ -138,8 +139,8 @@ def build(lesson_id, q, video, audio):
         try:
             if os.path.exists(tmp):
                 os.remove(tmp)
-        except OSError:
-            pass
+        except OSError as _e:
+            _silent.log_squash(__name__, _e)
         raise RuntimeError((r.stderr or b"").decode("utf-8", "replace")[:200] or "ffmpeg 合流失败")
     os.replace(tmp, out)
     # 轨文件占地方，合完就删 —— 留 mp4 一份就够
@@ -147,8 +148,8 @@ def build(lesson_id, q, video, audio):
         try:
             if f and os.path.exists(f):
                 os.remove(f)
-        except OSError:
-            pass
+        except OSError as _e:
+            _silent.log_squash(__name__, _e)
     trim(out)
     return out
 
@@ -222,8 +223,8 @@ def trim(keep_path=None, limit_gb=None):
             try:
                 os.remove(p)
                 freed += sz
-            except OSError:
-                pass
+            except OSError as _e:
+                _silent.log_squash(__name__, _e)
         return freed
     except Exception:
         return 0
@@ -364,8 +365,8 @@ def status():
             try:
                 n += 1
                 b += os.path.getsize(os.path.join(d, f))
-            except OSError:
-                pass
+            except OSError as _e:
+                _silent.log_squash(__name__, _e)
         st["files"] = n
         st["bytes"] = b
     except Exception:

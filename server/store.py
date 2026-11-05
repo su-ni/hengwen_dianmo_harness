@@ -17,6 +17,7 @@ import platform
 import uuid
 
 from . import config
+from . import silent as _silent
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS events(
@@ -285,8 +286,8 @@ def init(db_path=None):
             # 迁移失败不能让整站起不来：记下原因，界面按「没有工作区」走
             try:
                 kv_set("ws.init_error", "%s: %s" % (type(e).__name__, e))
-            except Exception:
-                pass
+            except Exception as _e:
+                _silent.log_squash(__name__, _e)
         con.commit()
     finally:
         con.close()
@@ -307,13 +308,13 @@ def ensure_sync_columns(con):
         if cols and "uid" not in cols:
             try:
                 con.execute("ALTER TABLE %s ADD COLUMN uid TEXT" % t)
-            except sqlite3.Error:
-                pass
+            except sqlite3.Error as _e:
+                _silent.log_squash(__name__, _e)
             try:
                 con.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_%s_uid ON %s(uid)"
                             % (t, t))
-            except sqlite3.Error:
-                pass
+            except sqlite3.Error as _e:
+                _silent.log_squash(__name__, _e)
     # answers 的 source / subject：让五科作答进同一张表也能分清是谁的题。
     # 老库默认按 grammar780（以前唯一的题源）回填，历史数据不丢、不错归。
     acols = {r["name"] for r in con.execute("PRAGMA table_info(answers)").fetchall()}
@@ -322,8 +323,8 @@ def ensure_sync_columns(con):
         if acols and c not in acols:
             try:
                 con.execute(ddl)
-            except sqlite3.Error:
-                pass
+            except sqlite3.Error as _e:
+                _silent.log_squash(__name__, _e)
     # 全新库这时候还没有表（init 里这段跑在 executescript 之前），
     # 回填和索引都得等 schema 落下来再做；老库才现在就补。
     if acols:
@@ -335,8 +336,8 @@ def ensure_sync_columns(con):
         if c not in cols:
             try:
                 con.execute(ddl)
-            except sqlite3.Error:
-                pass
+            except sqlite3.Error as _e:
+                _silent.log_squash(__name__, _e)
 
     # shots.tags —— 截图标签。老库里 shots 可能已经存在但没这一列，
     # 补上就行；表还不存在时 PRAGMA 返回空集，跳过（等 executescript 建表）。
@@ -344,8 +345,8 @@ def ensure_sync_columns(con):
     if scols and "tags" not in scols:
         try:
             con.execute("ALTER TABLE shots ADD COLUMN tags TEXT")
-        except sqlite3.Error:
-            pass
+        except sqlite3.Error as _e:
+            _silent.log_squash(__name__, _e)
 
     # shots.origin / pos_sec / src_path —— 素材库四类来源，见 docs/画布与课堂-开发文档.md 2.5。
     # origin 区分 frame（视频帧，带时间点）/ canvas（画布导出）/ upload / note（外部笔记里的图）。
@@ -357,13 +358,13 @@ def ensure_sync_columns(con):
         if scols and c not in scols:
             try:
                 con.execute(ddl)
-            except sqlite3.Error:
-                pass
+            except sqlite3.Error as _e:
+                _silent.log_squash(__name__, _e)
     if scols:
         try:
             con.execute("CREATE INDEX IF NOT EXISTS ix_shots_origin ON shots(origin, ts)")
-        except sqlite3.Error:
-            pass
+        except sqlite3.Error as _e:
+            _silent.log_squash(__name__, _e)
 
     # canvas_maps.lesson_ids —— 一张画布可以挂多讲。旧 lesson_id 留作「主讲次」，
     # 老数据、老备份、外部工具都还认得它。NULL 或 '[]' 表示没挂讲次。
@@ -371,8 +372,8 @@ def ensure_sync_columns(con):
     if mcols and "lesson_ids" not in mcols:
         try:
             con.execute("ALTER TABLE canvas_maps ADD COLUMN lesson_ids TEXT")
-        except sqlite3.Error:
-            pass
+        except sqlite3.Error as _e:
+            _silent.log_squash(__name__, _e)
 
     # 工作区隔离：7 张业务表补 workspace_id（见 _ensure_workspace_columns）
     _ensure_workspace_columns(con)
@@ -398,13 +399,13 @@ def _ensure_workspace_columns(con):
         if "workspace_id" not in cols:
             try:
                 con.execute("ALTER TABLE %s ADD COLUMN workspace_id TEXT" % t)
-            except sqlite3.Error:
-                pass
+            except sqlite3.Error as _e:
+                _silent.log_squash(__name__, _e)
         try:
             con.execute("CREATE INDEX IF NOT EXISTS ix_%s_ws ON %s(workspace_id)"
                         % (t, t))
-        except sqlite3.Error:
-            pass
+        except sqlite3.Error as _e:
+            _silent.log_squash(__name__, _e)
 
 
 def ws_now():
@@ -2170,8 +2171,8 @@ def session_delete(sid):
         try:
             if str(kv_get("agent.current_session") or "") == sid:
                 kv_set("agent.current_session", "")
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
         return {"ok": True, "id": sid, "events_deleted": n_ev}
     finally:
         con.close()
@@ -2372,8 +2373,8 @@ def merge_bundle(bundle):
                         tuple(src.values()))
                     if con.total_changes > before:
                         a += 1
-                except sqlite3.Error:
-                    pass
+                except sqlite3.Error as _e:
+                    _silent.log_squash(__name__, _e)
             added[t], updated[t] = a, u
 
         # ---- lesson_progress：新的赢，且谁标了 done 就别弄丢

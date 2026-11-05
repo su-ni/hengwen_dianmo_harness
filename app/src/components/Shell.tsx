@@ -9,7 +9,7 @@ import { useTool } from '../lib/useTool'
 export type PageKey =
   | 'index' | 'home' | 'today' | 'classroom' | 'courses' | 'schedule' | 'vocab'
   | 'practice' | 'notes' | 'notesAll' | 'exam' | 'stats' | 'writing' | 'agent' | 'canvas' | 'shots'
-  | 'search' | 'skills'
+  | 'search' | 'skills' | 'haloflux'
 
 export type NavItem = { k: PageKey; t: string; n: IconName; cnt?: (b: Base) => number }
 
@@ -38,6 +38,7 @@ const ICON_NAV_TAIL: { k: PageKey; t: string; n: IconName }[] = [
      以前只有课堂右栏（本讲 24 张）和画布抽屉能看到 —— 截了 200 张没处找。 */
   { k: 'shots', t: '截图库', n: 'img' },
   { k: 'skills', t: '技能中心', n: 'stack' },
+  { k: 'haloflux', t: 'haloflux', n: 'canvas' },
   { k: 'agent', t: '设置', n: 'agent' },
 ]
 
@@ -80,6 +81,7 @@ export const TITLES: Record<PageKey, { kick: string; h1: string; sub: string }> 
   shots: { kick: '截图库', h1: '截过的每一帧', sub: '课堂按 S 存的帧、画布导出的图、上传的图 —— 按科目和关键词找得到' },
   search: { kick: '搜索', h1: '全局搜索', sub: '页面 / 能力 / 题考点词 / 语义 / 本机文件 / AI 会话 —— 一路并排' },
   skills: { kick: '本机', h1: '技能', sub: '教模型怎么做的说明' },
+  haloflux: { kick: '本机', h1: 'haloflux', sub: '光环 · 记忆 · 运行时' },
   index: { kick: '工作区', h1: '工作区', sub: '' },
 }
 

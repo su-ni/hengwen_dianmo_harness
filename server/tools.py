@@ -20,6 +20,7 @@ import uuid
 from . import (agent, asr, bcz, bili, config, context, datahub, decider, evidence, explain,
                fsops, intake, intent, kb, model_router, notesrc, perm, planner,
                platform_ai, store, streamer, websearch, writing, xmind)
+from . import silent as _silent
 
 REGISTRY = {}
 
@@ -38,8 +39,8 @@ def tick(msg, **kw):
         d = {"msg": str(msg)[:180]}
         d.update({k: v for k, v in kw.items() if isinstance(v, (int, float, str, bool))})
         cb(d)
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
 
 
 def tool(name, perm, desc):
@@ -357,12 +358,12 @@ def _bili_push_quiet(lesson_id, pos_sec):
                 if err:
                     return
                 bili.report_progress(bvid, cid, p, ck)
-            except Exception:
-                pass
+            except Exception as _e:
+                _silent.log_squash(__name__, _e)
 
         threading.Thread(target=run, daemon=True).start()
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
 
 
 @tool("log_playback", config.PERM_LOCAL, "上报播放位置与本段实看秒数（真实计时，不是视频长度）")
@@ -453,8 +454,63 @@ def sync_progress_file():
 @tool("plan_today", config.PERM_LOCAL, "按断点/到期/未开科目生成今日编排")
 def t_plan_today(**_):
     wid, subs = _ws_scope()
+    # 3.5) 熟练度驱动（D37）—— **放在「没挂科目」的提前返回之前**。
+    #
+    # 为什么必须提前：熟练度是跨科目的「他哪些知识点不牢」，
+    # 跟这个工作区有没有挂科目**没有关系**。
+    # 实测踩过：工作区没挂科目时 plan_today 在开头直接 return，
+    # 我加在后面的熟练度段一次都没跑过 —— 修了两轮才发现位置错了。
+    rows = []
+    # 3.5) 熟练度驱动（D37）：今天该复习的 + 最不牢的
+    # 前四类回答「哪些内容还没过一遍」，这一类回答「哪些过了但没学会」。
+    # 两类都排：到期项是 FSRS 算「时间到了」，薄弱项是判断出来的 ——
+    # 一条可以「还没到期但已经很薄」，那种最危险，只能靠薄弱项捞出来。
+    try:
+        from . import mastery as _ma
+        _wid2 = (store.kv_get("ws.current") or None)
+        _due = _ma.due_items(workspace_id=_wid2, limit=3)
+        _st = _ma.stats(workspace_id=_wid2)
+        _weak = [w for w in (_st.get("weak") or []) if (w.get("score") or 0) < 0.5][:2]
+        _seen_ids = set()
+        for r in _due + _weak:
+            _iid = str(r.get("item_id") or "").strip()
+            if not _iid or _iid in _seen_ids:
+                continue
+            _seen_ids.add(_iid)
+            _is_due = any(str(x.get("item_id")) == _iid for x in _due)
+            _sc = r.get("model_score") or r.get("score") or 0
+            _why = r.get("model_reason") or ""
+            # **必须带 subject**：`rows` 在 _WS_LIST_FIELDS 里（按科目筛的数据列表）。
+            # 少这个字段，整段会被清空成 [] —— 而 say 还写着"排了 2 项"。
+            # 这是坑 11 第三次踩到，实测表现极具迷惑性：文字对、数据是空的。
+            rows.append({
+                "cls": "en",
+                "title": ("复习 · " if _is_due else "补一补 · ") + _iid,
+                "meta": "掌握 %d%%%s%s" % (
+                    round(float(_sc) * 100),
+                    (" · " + str(_why)[:26]) if _why else "",
+                    " · 今天到期" if _is_due else " · 一直没练牢",
+                ),
+                "action": "去练", "page": "practice",
+                "subject": r.get("subject") or "mastery",
+                "mastery_id": _iid,
+            })
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     if wid and not subs:
-        return {"rows": [], "say": "这个工作区还没挂科目，没东西可排"}
+        # 不直接 return 空 —— rows 里可能已经有熟练度驱动的行。
+        # 「没挂科目」只挡「按讲次排课」，不该挡「哪些知识点不牢」。
+        if not rows:
+            return {"rows": [], "say": "这个工作区还没挂科目，没东西可排"}
+        # 字段名不能叫 rows —— 它在 _WS_LIST_FIELDS 里，工作区没挂科目时
+        # 会被无条件清空成 []（坑 11 第四次）。用一个不参与过滤的名字带出去，
+        # 前端按 mastery_rows 读。这不是绕过隔离：这些行是关于「他」的熟练度，
+        # 本来就不属于某个科目。
+        return {"rows": rows, "mastery_rows": rows,
+                "say": "今天按熟练度排了 %d 项（工作区还没挂科目，讲次暂时排不了）。" % len(rows),
+                "effect": "%d rows planned" % len(rows),
+                "rule": "熟练度驱动（今天到期 > 最不牢）",
+                "due_today": 0}
     p = datahub.proto()
     done = datahub.done_ids()
     rows = []
@@ -509,6 +565,7 @@ def t_plan_today(**_):
     if part:
         rows.append({"cls": "en", "title": "练习 · " + re.sub(r"^第[一二三四五六七八九十]+部分：", "", part),
                      "meta": meta, "action": "去练", "page": "practice", "part": part})
+
 
     # 4) 未动过的最高分科目：开新坑
     cand = None
@@ -886,6 +943,23 @@ def t_grade_word(word=None, mode="card", answer=None, right=None, fuzzy=0, **_):
     if ok is None:
         return {"error": "这个模式没有可判定的答案：%s" % mode}
     rec = store.grade_word(word, ok, fuzzy=is_fuzzy)
+    # 同步到统一的熟练度系统（第 11 章）。
+    # 为什么不是各记一套：单词这边原来只有 box（SM-2 的盒子），
+    # 而 mastery 是跨科目统一的（数学/英语/政治都用它）。
+    # 两套并存的话，「他到底哪科最弱」这个问题永远答不出来 ——
+    # 单词的弱在 box 里，数学的弱在 mastery 里，没法比。
+    try:
+        from . import mastery as _ma
+        _rating = _ma.AGAIN if (not ok) else (_ma.HARD if is_fuzzy else _ma.GOOD)
+        _mr = _ma.record(word, item_kind="word", subject="english",
+                         rating=_rating, workspace_id=_ws_or())
+        if isinstance(_mr, dict) and _mr.get("ok"):
+            rec = dict(rec or {})
+            rec["mastery"] = {"score": _mr.get("score"),
+                              "reason": _mr.get("reason"),
+                              "next_in": _mr.get("next_in")}
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     store.add_event("grade_word", word=word, ok=(False if is_fuzzy else ok),
                     payload="mode=%s%s" % (mode, ";fuzzy" if is_fuzzy else ""))
     _ms = store.mem_stats()
@@ -1197,8 +1271,8 @@ def t_word_detail(word=None, force=False, **_):
                         d.get("word") or word, d.get("source") or "百词斩")
                     d["effect"] = "word detail %s cache-hit" % word
                     return d
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
 
     def _fallback(reason, source=None):
         return {
@@ -1674,8 +1748,8 @@ def t_paper_pull(url=None, text=None, subject=None, subject_name=None,
     # 索引挂了不影响拉卷本身（卷已经落盘），所以静默跳过。
     try:
         kb.index_paper(paper, pid=pid)
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     tick("核对题量", n=3, total=3)
     miss = len(withopts) - len(with_ans)
     return {"ok": True, "paper_id": pid, "name": nm, "subject": sid, "subject_name": sname,
@@ -1705,8 +1779,8 @@ def t_paper_drop(paper_id=None, **_):
     # 卷删了，索引里那套题也一起走 —— 不然会留下「搜得到、点进去是空的」
     try:
         kb.drop_paper(pid)
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     return {"ok": True, "removed": pid, "name": hit.get("name"), "left": len(papers) - 1,
             "say": "删掉了《%s》，还剩 %d 套拉进来的卷。" % (hit.get("name"), len(papers) - 1),
             "effect": "paper %s removed" % pid}
@@ -2369,14 +2443,14 @@ def t_source_import(source=None, items=None, subject=None, subject_name=None,
     path = config.IMPORTED_SOURCES
     try:
         _os.makedirs(_os.path.dirname(path), exist_ok=True)
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     data = {"sources": []}
     try:
         with _io.open(path, encoding="utf-8") as f:
             data = json.load(f)
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     srcs = [s for s in (data.get("sources") or []) if s.get("id") != source]
     srcs.append({"id": source, "subject": subject,
                  # 中文科目名单独存一个字段：前端不再拿 id 去猜「这是英语还是高数」
@@ -2761,8 +2835,8 @@ def t_quiz_gen(subject=None, topic=None, n=5, lesson_id=None, **_):
     # 索引失败不能拖垮出题本身 —— 题已经落盘了，这里是锦上添花，出错就静默跳过。
     try:
         kb.index_gen_source(srcs[-1])
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     miss = len(good) - len(kept)
     return {"ok": True, "source": src_id, "generated": len(arr), "kept": len(kept),
             "dropped": len(bad), "mismatch": len(mismatch), "mismatch_sample": mismatch[:3],
@@ -2971,8 +3045,8 @@ def t_paper_make(subject=None, n=20, name=None, **_):
     # 组好的卷同样立刻进索引（真题那部分是 real，AI 补的那部分是新内容）
     try:
         kb.index_paper(paper, pid=pid)
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     tick("核对题量", n=3, total=3)
     real_n = sum(1 for g in out_groups for q in g["questions"] if q.get("origin") == "real")
     ai_n = total - real_n
@@ -3754,8 +3828,8 @@ def t_save_note(lesson_id=None, text=None, pos_sec=0, **_):
     # 所以吃掉异常，下次全量重建自然会补上。
     try:
         kb.index_note(lesson_id, text)
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     _c = store.note_count()
     return {"note": r, "count": _c,
             "say": "笔记存下了（%d 字，挂在 %s 的第 %s 秒）。这一讲现在一共 %d 条笔记。" % (
@@ -4032,8 +4106,8 @@ def t_restore_backup(name=None, **_):
                   "word_mem", "lesson_progress", "exam_sessions", "kv"):
             try:
                 con.execute("DELETE FROM %s" % t)
-            except sqlite3.Error:
-                pass
+            except sqlite3.Error as _e:
+                _silent.log_squash(__name__, _e)
         applied = {}
         for t, rows in tables.items():
             tick("回填 %s" % t, n=4, total=4)
@@ -4125,8 +4199,8 @@ def t_platform_reset(confirm=None, keep_model=True, **_):
             if os.path.exists(p):
                 os.remove(p)
                 files.append(os.path.basename(p))
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
     # 内存缓存必须一起清，否则界面还拿着上一版的课程库/词书
     for _c in (datahub._proto_cache, datahub._extra_cache, datahub._vocab_cache,
                datahub._exam_cache, datahub._imp_cache,
@@ -5283,8 +5357,8 @@ def t_note_save(lesson_id=None, title=None, tree=None, src="local", src_id=None,
     try:
         kb.index_canvas(mid, title=title, tree=(r or {}).get("tree") or tree,
                         lesson_id=(r or {}).get("lesson_id") or lesson_id)
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     return {"ok": True, "map": r, "count": store.canvas_count(),
             "say": "画布「%s」存下了，图库里一共 %d 张。" % (
                 (r or {}).get("title") or mid, store.canvas_count()),
@@ -5312,8 +5386,8 @@ def t_note_del(map_id=None, **_):
     # 那比搜不到更让人恼火（跟 drop_paper 同一个道理）。
     try:
         kb.drop("canvas", map_id)
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     store.add_event("note_del", map_id)
     title = old.get("title") or ""
     say = ("画布「%s」从库里删了。盘上的原文件（如果有）没动 —— "
@@ -5822,8 +5896,8 @@ def call(name, args=None, confirmed=False, progress=None):
                     "perm": ent["perm"], "ms": ms, "ts": store.now(), "data": {},
                     "error": "现在是「计划」模式，只读不改。"
                              "要我动手就把模式切到「标准」或「自动」。"}
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
 
     # 权限档在这里生效：ask 要人点头 / auto 直接放行 / readonly 一律挡住。
     # 档位本身只能由人改（perm.set_mode 不在工具注册表里），模型拧不大自己的权限。
@@ -5855,8 +5929,8 @@ def call(name, args=None, confirmed=False, progress=None):
                 _w = store.kv_get("ws.current") or None
                 if _w:
                     _args["workspace_id"] = _w
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
         try:
             data = ent["fn"](**_args) or {}
         finally:
@@ -5865,8 +5939,8 @@ def call(name, args=None, confirmed=False, progress=None):
         if isinstance(data, dict) and not data.get("error"):
             try:
                 data = _ws_filter(data)
-            except Exception:
-                pass
+            except Exception as _e:
+                _silent.log_squash(__name__, _e)
         ok = not data.get("error")
         # 有些工具（bili_verify、bili_search…）的业务失败写在 data["ok"]=False
         # 和 data["reason"] 里，没有 error 键 —— 原来会被包成 ok:true，
@@ -5888,8 +5962,8 @@ def call(name, args=None, confirmed=False, progress=None):
     try:
         store.log_tool(name, ent["perm"], json.dumps(args or {}, ensure_ascii=False)[:400],
                        ok, ms, note)
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     return {"ok": ok, "tool": name, "perm": ent["perm"], "desc": ent["desc"],
             "ms": ms, "ts": store.now(), "data": data}
 
@@ -6186,6 +6260,19 @@ CATS = [
       "skill",
       # 计划文档：计划模式下产出方案用
       "plan_doc_write", "plan_doc_list"]),
+
+
+
+    # 记忆单独一类。之前它挂在「对话·助手自身」里，触发词全是
+    # 「换思考强度 / 清空对话」这类 —— 模型想问「他的作息」时，
+    # 按关键词根本检索不到这一类，自然也想不到有记忆可查（实测过）。
+    # 记忆不是一个「助手设置」，是一份**关于他是谁的资料**。
+    ("记忆·他是谁", "他的目标、弱项、作息、偏好 —— 回答前先查，别重复问他已经说过的",
+     ["记忆", "他之前说过", "还记得", "我的目标", "我的弱项", "作息", "偏好",
+      "答错", "答对", "做了题", "记录作答", "熟练度", "掌握",
+      "他喜欢", "他习惯", "以前说过", "别重复问", "记住我"],
+     ["mastery_record", "mastery_list", "judge_train", "judge_status", "judge_reset",
+      "memory_recall", "memory_add", "memory_correct", "memory_search", "memory_list", "memory_drop"]),
 ]
 
 
@@ -6393,6 +6480,92 @@ def t_ws_set_subjects(wid=None, subjects=None, **_):
                        % (ws["name"], len(ids), "、".join(ids))}
     finally:
         con.close()
+
+
+@tool("memory_add", config.PERM_CONFIRM,
+      "记住一件关于他的事（目标/弱项/作息/偏好）。下次不用再问")
+def t_memory_add(text=None, kind="fact", weight=0.6, **_):
+    """记忆是「他是谁」，不是「他说过什么」。领域逻辑见 memories.handle_add。"""
+    from . import memories as _m
+    return _m.handle_add(text, kind=kind, weight=weight, wid=_ws_or())
+
+
+@tool("judge_train", config.PERM_CONFIRM,
+      "训练判断模型（从真实作答样本学）。样本不够会明确拒绝，不硬训")
+def t_judge_train(**_):
+    """领域逻辑见 judge.handle_train。"""
+    from . import judge as _j
+    return _j.handle_train()
+
+
+@tool("judge_status", config.PERM_LOCAL,
+      "看判断模型现在什么状态：训过没、多少样本、权重是什么")
+def t_judge_status(**_):
+    from . import judge as _j
+    return _j.handle_status()
+
+
+@tool("judge_reset", config.PERM_CONFIRM,
+      "删掉已训练的模型，退回规则版（训错了要能退）")
+def t_judge_reset(**_):
+    from . import judge as _j
+    return _j.handle_reset()
+
+
+@tool("mastery_record", config.PERM_LOCAL,
+      "记一次作答（更新复习时间+掌握度）。**直接调它，不要先查题库**："
+      "没有题号就传 prompt=「递归」当主题")
+def t_mastery_record(item_id=None, item_kind="word", subject=None,
+                     rating="good", elapsed_ms=None, hesitations=0,
+                     prompt=None, response=None, **_):
+    """领域逻辑见 mastery.handle_record（rating 映射、kind 纠正都在那边）。"""
+    from . import mastery as _m
+    return _m.handle_record(item_id=item_id, item_kind=item_kind, subject=subject,
+                            rating=rating, elapsed_ms=elapsed_ms,
+                            hesitations=hesitations, prompt=prompt, response=response,
+                            wid=_ws_or())
+
+
+@tool("mastery_list", config.PERM_LOCAL,
+      "看熟练度：哪些到期待复习、哪些最薄。给建议/排计划前先看")
+def t_mastery_list(due=0, item_kind=None, limit=20, **_):
+    from . import mastery as _m
+    return _m.handle_list(due=due, item_kind=item_kind, limit=limit, wid=_ws_or())
+
+
+@tool("memory_recall", config.PERM_LOCAL,
+      "按需检索关于他的记忆（向量+关键词混合）。给建议/排计划/不确定他说过什么时先查")
+def t_memory_recall(q=None, k=5, limit=None, **_):
+    """检索主入口。领域逻辑见 memories.handle_recall。"""
+    from . import memories as _m
+    return _m.handle_recall(q=q, k=k, limit=limit, wid=_ws_or())
+
+
+@tool("memory_search", config.PERM_LOCAL, "查关于他的记忆")
+def t_memory_search(q=None, limit=12, **_):
+    """memory_recall 的旧名字，保留兼容。字段用 memories 不是 items（坑 11）。"""
+    from . import memories as _m
+    return _m.handle_search(q=q, limit=limit, wid=_ws_or())
+
+
+@tool("memory_correct", config.PERM_CONFIRM,
+      "纠正一条记错的记忆（旧说法作废，换新的）。他说「不对，是 X」时用")
+def t_memory_correct(id=None, content=None, **_):
+    """领域逻辑见 memories.handle_correct：封存旧条 + 新增 + refines 边。"""
+    from . import memories as _m
+    return _m.handle_correct(id=id, content=content)
+
+
+@tool("memory_list", config.PERM_LOCAL, "列出记得的关于他的事")
+def t_memory_list(kind=None, limit=50, **_):
+    from . import memories as _m
+    return _m.handle_list(kind=kind, limit=limit, wid=_ws_or())
+
+
+@tool("memory_drop", config.PERM_CONFIRM, "删掉一条记忆（记错了要能纠正）")
+def t_memory_drop(id=None, **_):
+    from . import memories as _m
+    return _m.handle_drop(id=id)
 
 
 @tool("plan_doc_write", config.PERM_CONFIRM,
@@ -6633,8 +6806,8 @@ def t_agent_reset(**_):
         r["say"] = ("对话记录清掉了（%s 条消息存在 agent.thread.bak），新会话已开。"
                     "想捞回来点「撤销清空」。" % (n if n else "0"))
         r["effect"] = "session %s" % (r.get("session") or "")
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     return r
 
 

@@ -19,6 +19,7 @@ import threading
 import time
 
 from . import config
+from . import silent as _silent
 
 # base 模型：中文能听、CPU 上够快。换大模型只改这一行，别的都不用动。
 REPO = "Systran/faster-whisper-base"
@@ -60,10 +61,10 @@ def _dir_size(d):
             for f in files:
                 try:
                     n += os.path.getsize(os.path.join(root, f))
-                except OSError:
-                    pass
-    except OSError:
-        pass
+                except OSError as _e:
+                    _silent.log_squash(__name__, _e)
+    except OSError as _e:
+        _silent.log_squash(__name__, _e)
     return n
 
 
@@ -74,8 +75,8 @@ def _cached_size():
         for r in scan_cache_dir().repos:
             if r.repo_id == REPO:
                 return int(r.size_on_disk)
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     return 0
 
 
@@ -127,8 +128,8 @@ def _copy_from(src):
         p = os.path.join(src, n)
         try:
             total += os.path.getsize(p)
-        except OSError:
-            pass
+        except OSError as _e:
+            _silent.log_squash(__name__, _e)
     _set_job(total=total, bytes=0, stage="从本机缓存复制")
     done = 0
     for n in names:
@@ -136,8 +137,8 @@ def _copy_from(src):
         shutil.copy2(p, os.path.join(MODEL_DIR, n))
         try:
             done += os.path.getsize(p)
-        except OSError:
-            pass
+        except OSError as _e:
+            _silent.log_squash(__name__, _e)
         _set_job(bytes=done, stage="复制 " + n)
 
 
@@ -435,8 +436,8 @@ def live_start(sid):
         def _warm():
             try:
                 load()
-            except Exception:
-                pass
+            except Exception as _e:
+                _silent.log_squash(__name__, _e)
         threading.Thread(target=_warm, daemon=True, name="asr-warm").start()
     return {"ok": True, "say": "可以说了", "warm": _MODEL is not None}
 

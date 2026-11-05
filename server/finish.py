@@ -19,6 +19,7 @@ import json
 import re
 
 from . import store
+from . import silent as _silent
 
 
 def _clip(s, n):
@@ -59,8 +60,8 @@ def _suggest_by_rule(reply_text):
             out.append("接着学下一讲")
         if int(k.get("exam_papers") or 0) > 0:
             out.append("做一套真题卷试试")
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
 
     first = _clip(reply_text, 80)
     if first and len(out) < 4:
@@ -136,8 +137,8 @@ def finish_turn_text(user_text, reply_text):
                             sug.append(t)
                         if len(sug) >= 4:
                             break
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
 
     if title and len(sug) >= 4:
         return {"title": title, "suggest": sug}, "model"

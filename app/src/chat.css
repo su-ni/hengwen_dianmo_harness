@@ -1026,3 +1026,11 @@
   font-size: 11.5px;
 }
 .cask-done svg { color: #5ac882; flex: none; }
+
+
+/* 「它记住了什么」那一行。
+   用青色（--en = 已确立的事实）跟工具调用的白灰区分开 ——
+   这不是「调了个工具」，是「这个系统对你的认识又多了/变了一条」。
+   不做得显眼（每次对话都可能出现，太跳会烦），但必须认得出。 */
+.arow.mem .atxt { color: var(--en); }
+.arow.mem .adot { background: var(--en); }

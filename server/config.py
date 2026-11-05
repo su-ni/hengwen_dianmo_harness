@@ -7,6 +7,7 @@
 import io
 import json
 import os
+from . import silent as _silent
 
 # --------------------------------------------------------------------------
 # 路径
@@ -223,8 +224,8 @@ def _apply_local_override(cfg):
     try:
         with io.open(path, encoding="utf-8") as f:
             cfg.update(json.load(f))
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
     return cfg
 
 

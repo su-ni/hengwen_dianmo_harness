@@ -22,6 +22,7 @@ from fastapi.responses import (HTMLResponse, JSONResponse, FileResponse, PlainTe
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.gzip import GZipMiddleware
+from . import silent as _silent
 
 if __package__ in (None, ""):                       # 允许 python server/main.py 直接跑
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -328,8 +329,8 @@ def api_build():
     for name in ("index.html", "app.js", "app.css", "canvas.css", "canvas.js"):
         try:
             stamp = max(stamp, int(os.path.getmtime(os.path.join(config.WEB_DIR, name))))
-        except OSError:
-            pass
+        except OSError as _e:
+            _silent.log_squash(__name__, _e)
     return {"stamp": stamp,
             "build": time.strftime("%Y%m%d-%H%M", time.localtime(stamp)) if stamp else ""}
 
@@ -381,6 +382,136 @@ async def api_onboard(request: Request):
         body = {}
     store.kv_set("app.onboarded", "1" if body.get("done") else "0")
     return {"ok": True, "onboarded": store.kv_get("app.onboarded") == "1"}
+
+
+# 启动时预热向量后端。
+#
+# 为什么要在启动时做：bge 模型加载要 10~15 秒。如果等第一次记忆检索时现加载，
+# 用户点开记忆页会卡十几秒 —— 看着像卡死了。放启动时加载，
+# 那段时间本来就在等 uvicorn 起来，不占用任何人的等待。
+# 加载失败不影响服务：backend() 会降级到哈希，功能不断。
+def _prewarm_embed():
+    import threading
+    def _w():
+        try:
+            from . import embed as _e
+            _e.backend()
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
+    threading.Thread(target=_w, daemon=True, name="embed-prewarm").start()
+
+
+@app.on_event("startup")
+def _on_start():
+    _prewarm_embed()
+
+@app.get("/api/mastery")
+def api_mastery(due: int = 0, kind: str = "", limit: int = 20):
+    """熟练度概览 / 到期列表（第 11 章 D33–D37）。
+
+    两个用途分开：
+      due=0  看全局（总条数、平均掌握度、最薄的几条、训练样本攒了多少）
+      due=1  看今天该复习什么（按 FSRS 的 due 排）
+    """
+    from . import mastery as _ma
+    wid = (store.kv_get("ws.current") or None)
+    if due:
+        rows = _ma.due_items(workspace_id=wid, item_kind=(kind or None), limit=int(limit or 20))
+        # 字段名避开 items（在工作区过滤清单里，会被清空）
+        return {"ok": True, "n": len(rows),
+                "due": [{"item_id": r["item_id"], "kind": r.get("item_kind"),
+                         "score": r.get("model_score"), "reason": r.get("model_reason"),
+                         "due": r.get("fsrs_due"),
+                         "next_in": _ma._human_due(r.get("fsrs_due"))} for r in rows]}
+    return {"ok": True, **_ma.stats(workspace_id=wid)}
+
+@app.get("/api/memories")
+def api_memories(kind: str = ""):
+    """记忆场读它：这个工作区记住的所有事。
+
+    每条带 layer（core/recall/archival）。为什么在后端算、不留给前端算：
+    这个判定是**记忆系统的规则**（什么该常驻在系统提示里），
+    它跟 prompt_note 用的是同一个函数。放到前端再算一遍，
+    两边一旦漂了，界面显示的层和模型实际看到的层就对不上 ——
+    那是这一版最不能出现的 bug。
+    """
+    from . import memories as mem
+    try:
+        from . import layers as _ly
+    except Exception:
+        _ly = None
+    wid = (store.kv_get("ws.current") or None)
+    items = mem.all_(workspace_id=wid, kind=(kind or None), limit=300)
+    # embedding 是 float32 二进制（384 维 = 1536 字节）。它**不该往前端发**：
+    # ① FastAPI 的 jsonable_encoder 遇到 bytes 会当 UTF-8 解码，直接 500（实测）；
+    # ② 就算编码成 base64，10 条也要多 20KB，而前端一个字节都用不上 ——
+    #    向量是用来排序的，排序在后端做完，前端只拿结果。
+    for r in items:
+        r.pop("embedding", None)
+    if _ly is not None:
+        for r in items:
+            try:
+                r["layer"] = _ly.layer_of(r)
+            except Exception:
+                r["layer"] = "recall"
+    ids = [r["id"] for r in items]
+    return {"ok": True, "items": items,
+            "links": mem.links_of(workspace_id=wid, ids=ids),
+            "stats": mem.stats(workspace_id=wid)}
+
+
+@app.post("/api/memories")
+async def api_memory_add(request: Request):
+    from . import memories as mem
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    wid = (store.kv_get("ws.current") or None)
+    return mem.add(body.get("text") or body.get("content"),
+                   kind=body.get("kind") or "fact",
+                   weight=body.get("weight", 0.6),
+                   source=body.get("src") or body.get("source") or "user",
+                   workspace_id=wid)
+
+
+@app.post("/api/memories/{mid}")
+async def api_memory_update(mid: str, request: Request):
+    from . import memories as mem
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return mem.update(mid, **body)
+
+
+@app.delete("/api/memories/{mid}")
+async def api_memory_drop(mid: str):
+    from . import memories as mem
+    return mem.drop(mid)
+
+
+@app.get("/api/bubbles")
+def api_bubbles(only_current: int = 0):
+    """气泡列表。默认**跨工作区**（D18）：别的区在跑也让你看见。"""
+    from . import bubbles as bb
+    wid = (store.kv_get("ws.current") or None)
+    return {"ok": True, "items": bb.list_(workspace_id=wid,
+                                          include_other=not bool(only_current))}
+
+
+@app.post("/api/bubbles/{bid}/dismiss")
+def api_bubble_dismiss(bid: str):
+    """点掉一条气泡。"""
+    from . import bubbles as bb
+    return bb.dismiss(bid)
+
+
+@app.post("/api/bubbles/clear")
+def api_bubbles_clear():
+    """清掉当前工作区的气泡。"""
+    from . import bubbles as bb
+    return bb.dismiss_all(store.kv_get("ws.current") or None)
 
 
 @app.get("/api/mode")
@@ -663,6 +794,7 @@ async def api_tool_run(name: str, request: Request):
                 import traceback
                 traceback.print_exc()
                 box["r"] = {"ok": False, "error": "工具炸了：%s" % str(e)[:200], "data": {}}
+
             q.put({"__end__": True})
 
         yield "data: " + json.dumps({"t": "start", "tool": name,
@@ -757,8 +889,27 @@ async def api_agent_stream(request: Request):
         q = _q.Queue()
         done = {}
 
+        # 气泡：这一轮开始就登记（跨工作区要能看见，所以状态在后端）。
+        # 这里同时知道「哪个工作区 + 哪个会话 + 什么时候开始」。
+        _bid = None
+        try:
+            from . import bubbles as _bb
+            _bid = _bb.start(workspace_id=(store.kv_get("ws.current") or None),
+                             session_id=str(store.kv_get("agent.current_session") or "") or None,
+                             title=(text or "接着干")[:40] if not resuming else "接着干")
+        except Exception:
+            _bid = None
+
+
         def sink(piece):
             # 两种东西都从这根管子过：模型吐的字（str）和工具轨迹（dict）。
+            # 工具轨迹顺手记进气泡：界面上的「调了 N 个工具」就是它
+            try:
+                if _bid and isinstance(piece, dict) and piece.get('t') in ('tool', 'run'):
+                    from . import bubbles as _bb2
+                    _bb2.tool(_bid, str(piece.get('n') or piece.get('desc') or '')[:40])
+            except Exception as _e:
+                _silent.log_squash(__name__, _e)
             # 无脑包成 token 会把轨迹包坏，前端拿到一个既不是字也不是轨迹的东西。
             if isinstance(piece, dict):
                 q.put(piece)
@@ -772,6 +923,21 @@ async def api_agent_stream(request: Request):
                     r = agent.resume(sink=sink, effort=effort)
                 else:
                     r = agent.turn(text, confirmed=confirmed, focus=focus, sink=sink, effort=effort)
+                # 气泡收尾：要人答 → heavy（可展开直接回复，D21）；否则 done
+                try:
+                    from . import bubbles as _bb3
+                    if _bid:
+                        _ask = (r or {}).get('ask')
+                        _pend = (r or {}).get('pending')
+                        if _ask:
+                            _bb3.need_answer(_bid, (_ask.get('question') or '有件事想问你'), _ask)
+                        elif _pend:
+                            _bb3.need_answer(_bid, '这一步要改本机：' + str(_pend.get('desc') or _pend.get('tool') or ''), None)
+                        else:
+                            _bb3.finish(_bid, ok=bool((r or {}).get('ok')),
+                                        error=((r or {}).get('error') or None))
+                except Exception as _e:
+                    _silent.log_squash(__name__, _e)
                 done["r"] = r
             except Exception as e:                      # 不让异常把连接掐死
                 # 留一份完整堆栈：只回一句「算崩了：xxx」的话，
@@ -779,9 +945,16 @@ async def api_agent_stream(request: Request):
                 try:
                     import traceback
                     traceback.print_exc()
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _silent.log_squash(__name__, _e)
                 done["r"] = {"ok": False, "error": "算崩了：%s" % str(e)[:200]}
+                try:
+                    from . import bubbles as _bb4
+                    if _bid:
+                        _bb4.finish(_bid, ok=False, error=str(e)[:80],
+                                    title="出错了")
+                except Exception as _e:
+                    _silent.log_squash(__name__, _e)
             q.put({"__end__": True})
 
         th = _th.Thread(target=work, daemon=True)
@@ -844,8 +1017,8 @@ async def api_agent_stream(request: Request):
                                    "status": _u.get("status") or "draft"})
             if _plans:
                 end["plans"] = _plans
-        except Exception:
-            pass
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
 
 
         yield "data: " + json.dumps(end, ensure_ascii=False) + "\n\n"
@@ -1015,6 +1188,13 @@ _APP_DIST = os.path.join(config.WEB_DIR, "app-dist")
 if os.path.isdir(_APP_DIST):
     app.mount("/app/assets", StaticFiles(directory=os.path.join(_APP_DIST, "assets")), name="app-assets")
 
+    # haloflux 官方项目原样挂出来（web/halo/lab.html）。
+    # 必须挂在 /app/{rel} 之前 —— 那个兜底路由会把一切路径都返回 index.html，
+    # 挂晚了就永远拿不到真正的 lab.html。
+    _HALO_DIR = os.path.join(config.WEB_DIR, "halo")
+    if os.path.isdir(_HALO_DIR):
+        app.mount("/app/halo", StaticFiles(directory=_HALO_DIR, html=True), name="halo")
+
     @app.get("/app", include_in_schema=False)
     @app.get("/app/{rel:path}", include_in_schema=False)
     def react_app(rel: str = ""):
@@ -1156,8 +1336,8 @@ def _make_thumb(src, key, w):
         except (KeyError, OSError, ValueError):
             try:
                 os.remove(tmp)
-            except OSError:
-                pass
+            except OSError as _e:
+                _silent.log_squash(__name__, _e)
             jpg = os.path.join(_THUMB_DIR, key + ".jpg")
             if im.mode == "RGBA":
                 bg = Image.new("RGB", im.size, (255, 255, 255))
@@ -1375,8 +1555,8 @@ async def stream_lesson(lesson_id: str, request: Request, q: int = 0):
     # 播放即「这条还在用」：缓存满了按 mtime 清最老的，正在看的不能被清。
     try:
         os.utime(path)
-    except OSError:
-        pass
+    except OSError as _e:
+        _silent.log_squash(__name__, _e)
     return _send_range(path, size, request)
 
 
@@ -1435,8 +1615,8 @@ def _open_browser(url: str):
     try:
         import threading, webbrowser
         threading.Timer(1.2, lambda: webbrowser.open(url)).start()
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
 
 
 def _warm_kb():
@@ -1454,8 +1634,8 @@ def _warm_kb():
         r = kb.available()
         print("语义检索预热：%s" % ("就绪，%d 维" % (r.get("dim") or 0) if r.get("ok")
                                  else (r.get("why") or "不可用")))
-    except Exception:
-        pass
+    except Exception as _e:
+        _silent.log_squash(__name__, _e)
 
 
 def _quiet_loop():
