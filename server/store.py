@@ -482,6 +482,30 @@ def add_event(kind, subject=None, lesson_id=None, word=None, part=None,
         con.close()
 
 
+def workspace_subjects(workspace_id):
+    """当前工作区挂的科目集合。
+
+    **为什么单独一个函数**：tools.py 原来把这条 SELECT 复制了 8 遍
+    （L233/266/738/906/1229/1516/1815/3705），每处都自己 connect/try/finally/close。
+    审计点名过这个重复。收归到这里之后，改字段名或加缓存只改一处。
+
+    返回 set；出错返回空 set（跟原来各处的 except 兜底一致，不抛给界面）。
+    没有工作区时返回 None —— 调用方靠 None 区分「不限制」和「限制了但一条都没有」，
+    这两种语义完全不一样，不能都给空 set。
+    """
+    if not workspace_id:
+        return None
+    con = connect()
+    try:
+        return {r["subject_id"] for r in con.execute(
+            "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
+            (workspace_id,)).fetchall()}
+    except Exception:
+        return set()
+    finally:
+        con.close()
+
+
 def recent_events(limit=20, workspace_id=None):
     con = connect()
     try:
@@ -1889,6 +1913,38 @@ def explain_stats():
 
 
 # ---------------------------------------------------------------- 错词本 / 今日词量（C6 / C7）
+def queue_words_for_today(words):
+    """把一组词放进今天的复习队列，返回 (新增数, 挪到今天数)。
+
+    **为什么要这个函数**：原来 tools.t_add_review 自己 connect() 后
+    直接 SELECT/INSERT/UPDATE word_mem —— 绕过数据层，字段改名时
+    工具层会第一个坏。入队是词记忆领域的操作，该归 store。
+
+    跟 grade_word 分开：那是**评分**（对/错 → 升降 box），
+    这是**入队**（把某讲的词挪到今天，不改对错统计）。混用会把
+    seen/right/wrong 写脏。
+    """
+    if not words:
+        return 0, 0
+    con = connect()
+    added, touched = 0, 0
+    try:
+        for w in words:
+            cur = con.execute("SELECT word FROM word_mem WHERE word=?", (w,)).fetchone()
+            if cur:
+                con.execute("UPDATE word_mem SET due=? WHERE word=?", (today(), w))
+                touched += 1
+            else:
+                con.execute(
+                    "INSERT INTO word_mem(word,box,due,seen,right,wrong,last_ts)"
+                    " VALUES(?,?,?,?,?,?,?)", (w, 1, today(), 0, 0, 0, now()))
+                added += 1
+        con.commit()
+    finally:
+        con.close()
+    return added, touched
+
+
 def wrong_words(limit=200):
     """错词本：答错过的词，错得多的排前面。"""
     con = connect()

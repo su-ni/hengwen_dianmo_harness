@@ -229,16 +229,7 @@ def t_list_subjects(workspace_id=None, all_workspaces=False, **_):
     done = datahub.done_ids()
     allow = None
     if wid:
-        try:
-            con = store.connect()
-            try:
-                allow = {r["subject_id"] for r in con.execute(
-                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
-                    (wid,)).fetchall()}
-            finally:
-                con.close()
-        except Exception:
-            allow = set()
+        allow = store.workspace_subjects(wid)
     out = []
     for s in p.get("subjects") or []:
         if allow is not None and s.get("id") not in allow:
@@ -262,16 +253,7 @@ def t_list_lessons(subject=None, workspace_id=None,
                    all_workspaces=False, **_):
     wid = None if all_workspaces else _ws_or(workspace_id)
     if wid:
-        try:
-            con = store.connect()
-            try:
-                allow = {r["subject_id"] for r in con.execute(
-                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
-                    (wid,)).fetchall()}
-            finally:
-                con.close()
-        except Exception:
-            allow = set()
+        allow = store.workspace_subjects(wid)
         if not allow:
             return {"groups": [], "chapters": [], "lessons": [],
                     "note": "这个工作区还没挂科目"}
@@ -734,16 +716,7 @@ def t_list_item_sources(subject=None, workspace_id=None,
     wid = None if all_workspaces else _ws_or(workspace_id)
     allow = None
     if wid:
-        try:
-            con = store.connect()
-            try:
-                allow = {r["subject_id"] for r in con.execute(
-                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
-                    (wid,)).fetchall()}
-            finally:
-                con.close()
-        except Exception:
-            allow = set()
+        allow = store.workspace_subjects(wid)
     srcs = [x for x in datahub.item_sources(subject)
             if allow is None or x.get("subject") in allow]
     return {"sources": srcs,
@@ -902,16 +875,7 @@ def t_list_word_group(key=None, lesson_id=None, workspace_id=None,
                       all_workspaces=False, **_):
     wid = None if all_workspaces else _ws_or(workspace_id)
     if wid:
-        try:
-            con = store.connect()
-            try:
-                allow = {r["subject_id"] for r in con.execute(
-                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
-                    (wid,)).fetchall()}
-            finally:
-                con.close()
-        except Exception:
-            allow = set()
+        allow = store.workspace_subjects(wid)
         if not allow:
             return {"key": None, "count": 0, "words": [],
                     "note": "这个工作区还没挂科目"}
@@ -1225,16 +1189,7 @@ def t_vocab_library(workspace_id=None, all_workspaces=False, **_):
     # 只给本工作区科目的词书；没挂科目 → 空
     allow = None
     if wid:
-        try:
-            con = store.connect()
-            try:
-                allow = {r["subject_id"] for r in con.execute(
-                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
-                    (wid,)).fetchall()}
-            finally:
-                con.close()
-        except Exception:
-            allow = set()
+        allow = store.workspace_subjects(wid)
     books = []
     # 工作区没挂科目 → 不给任何词书（allow 是空集时连课程词表也不给）
     if allow is not None and not allow:
@@ -1512,16 +1467,7 @@ def t_stats(workspace_id=None, all_workspaces=False, **_):
     # 科目范围：给了工作区就只算它的科目
     allow = None
     if wid:
-        try:
-            con = store.connect()
-            try:
-                allow = {r["subject_id"] for r in con.execute(
-                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
-                    (wid,)).fetchall()}
-            finally:
-                con.close()
-        except Exception:
-            allow = set()
+        allow = store.workspace_subjects(wid)
     subs_scope = [x for x in (p.get("subjects") or [])
                   if allow is None or x.get("id") in allow]
     done = datahub.done_ids()
@@ -1811,16 +1757,7 @@ def t_exam_papers(workspace_id=None, all_workspaces=False, **_):
     wid = None if all_workspaces else _ws_or(workspace_id)
     subs = None
     if wid:
-        try:
-            con = store.connect()
-            try:
-                subs = [r["subject_id"] for r in con.execute(
-                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
-                    (wid,)).fetchall()]
-            finally:
-                con.close()
-        except Exception:
-            subs = []
+        subs = store.workspace_subjects(wid)
     ps = datahub.exam_paper_meta(subject_ids=subs, workspace_id=wid)
     return {"papers": ps,
             "total_questions": sum(x["total"] or 0 for x in ps),
@@ -3638,22 +3575,7 @@ def t_add_review(lesson_id=None, **_):
     r = datahub.lesson_words(lesson_id)
     if not r.get("is_word_lesson"):
         return {"error": "本讲不是单词课，没有可加的词群"}
-    con = store.connect()
-    added, touched = 0, 0
-    try:
-        for w in r["words"]:
-            cur = con.execute("SELECT word FROM word_mem WHERE word=?", (w["w"],)).fetchone()
-            if cur:
-                con.execute("UPDATE word_mem SET due=? WHERE word=?", (store.today(), w["w"]))
-                touched += 1
-            else:
-                con.execute(
-                    "INSERT INTO word_mem(word,box,due,seen,right,wrong,last_ts)"
-                    " VALUES(?,?,?,?,?,?,?)", (w["w"], 1, store.today(), 0, 0, 0, store.now()))
-                added += 1
-        con.commit()
-    finally:
-        con.close()
+    added, touched = store.queue_words_for_today([w["w"] for w in r["words"]])
     store.add_event("queue_review", lesson_id=lesson_id, payload="%d+%d" % (added, touched))
     due = store.mem_stats()["due_today"]
     if added + touched:
@@ -3701,16 +3623,7 @@ def t_review_today(limit=200, workspace_id=None, all_workspaces=False, **_):
     不给任何「跟不背单词一样」的说法，只报本机真实的到期数据。"""
     wid = None if all_workspaces else _ws_or(workspace_id)
     if wid:
-        try:
-            con = store.connect()
-            try:
-                allowed = {r["subject_id"] for r in con.execute(
-                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
-                    (wid,)).fetchall()}
-            finally:
-                con.close()
-        except Exception:
-            allowed = set()
+        allowed = store.workspace_subjects(wid)
         if not allowed:
             return {"words": [], "count": 0, "empty_reason": "这个工作区还没挂科目"}
     rows = store.review_enriched(limit, workspace_id=wid)
