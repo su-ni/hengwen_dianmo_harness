@@ -256,24 +256,44 @@ export function routeRows(mems: MemRow[]): RouteRow[] {
 }
 
 /* ============================================================
-   7 · 子智能体派发（官方 12 AGENTS / DISPATCH）
-   真实的在跑任务 + 记忆类型，铺成网格
+   7 · 子智能体 / 派发 —— **真数据，不是示意**
+
+   原来这里编了 12 个「读/写/判/管」格子，done 用 % 7 拼出来，
+   跟系统里真实发生了什么毫无关系。用户明确说过「这页不是摆设」，
+   所以改成：按工具名前缀把 /api/tools 的 recent 真实流水聚成几路，
+   每路显示真实调用数、成功数、最近一次耗时。
+
+   系统目前**没有**多 agent 运行时（agent.py 只有一个 turn 循环），
+   所以不假装有一堆子智能体在跑 —— 面板名字保留，
+   但内容是「这台机器上工具实际被派发的分布」，不编角色、不编数量。
    ============================================================ */
 export type AgentCell = { id: string; role: string; done: number; st: string }
-export function agentCells(bubbles: Bubble[], mems: MemRow[]): AgentCell[] {
-  const out: AgentCell[] = []
-  const roles = ['读', '写', '判', '管']
+
+/* 工具名前缀 → 一路。顺序固定，界面上不跳。 */
+const LANES: { key: string; label: string; match: (n: string) => boolean }[] = [
+  { key: 'memory', label: '记忆', match: n => n.startsWith('memory_') },
+  { key: 'judge', label: '判断', match: n => n.startsWith('judge_') || n.startsWith('mastery_') },
+  { key: 'course', label: '课程', match: n => n.startsWith('course') || n.startsWith('lesson') || n.startsWith('bili_') },
+  { key: 'word', label: '词', match: n => n.startsWith('word') || n.startsWith('vocab') || n.startsWith('review') },
+  { key: 'plan', label: '计划', match: n => n.startsWith('plan') || n.startsWith('stats') || n.startsWith('checkin') },
+  { key: 'agent', label: '会话', match: n => n.startsWith('agent_') || n.startsWith('session') },
+]
+
+export function agentCells(bubbles: Bubble[], mems: MemRow[], calls: ToolCall[] = []): AgentCell[] {
   const live = bubbles.filter((b) => b.state === 'running' || b.state === 'ask')
-  const total = Math.max(4, Math.min(12, live.length + 4))
-  for (let i = 0; i < total; i++) {
-    const b = live[i % Math.max(1, live.length)]
-    const alive = !!b && i < Math.max(1, live.length)
-    out.push({
+  return LANES.map((lane, i) => {
+    const mine = calls.filter(c => lane.match(String(c.name || '')))
+    const okN = mine.filter(c => c.ok === 1).length
+    const last = mine[0]
+    const running = live.length > 0 && i < live.length
+    /* done 这一格现在装的是**真实调用数**（不再是 % 7 拼的假进度） */
+    return {
       id: String(i + 1).padStart(2, '0'),
-      role: roles[i % 4],
-      done: alive ? Math.min(6, (b?.tools || 0) % 7) : (mems.length > i ? 6 : 2),
-      st: alive ? (b?.state === 'ask' ? '等你答' : '在跑') : '空闲',
-    })
-  }
-  return out
+      role: lane.label,
+      done: Math.min(12, mine.length),
+      st: running
+        ? (live[i].state === 'ask' ? '等你答' : '在跑')
+        : (mine.length ? `${mine.length} 次 · 成 ${okN}${last?.ms ? ' · ' + last.ms + 'ms' : ''}` : '空闲'),
+    }
+  })
 }

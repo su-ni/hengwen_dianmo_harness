@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Logo } from '../components/Logo'
 import { HaloEngine } from './halo/engine'
+import { Tuner } from './halo/tuner'
 import { KIND_CN } from './halo/theme'
 import { pull, buildLinks, strokeOfTool, isAlive, kpisOf, kindBars, type Snapshot } from './halo/feed'
 import { drawAdv, drawDiff, drawVal, drawIdx, feedRows, codeLines, routeRows, agentCells } from './halo/panels'
@@ -67,6 +68,22 @@ export function Haloflux({ onExit }: { onExit?: () => void }) {
     try {
       const [s, b] = await Promise.all([pull(), fetch('/api/base').then((r) => r.json()).catch(() => null)])
       setSnap(s); setBase(b); setErr('')
+      /* 把真实数字喂给引擎：环上那 12 种数据块原来全是 rnd() 编的示意值，
+         现在轮着显示本机真数（记忆/关联/工具/向量/熟练度…）。
+         只取能核对的数字，不把「0」也塞进去充数 —— 那看着像有数据其实没有。 */
+      const st = s.stats || {}
+      const facts: Record<string, number> = {}
+      const put = (k: string, v: unknown) => {
+        if (typeof v === 'number' && Number.isFinite(v) && v > 0) facts[k] = v
+      }
+      put('mems', s.mems?.length)
+      put('links', s.links?.length)
+      put('calls', s.calls?.length)
+      put('core', st.layers?.core)
+      put('recall', st.layers?.recall)
+      put('vec', st.vector?.covered)
+      put('tools', b?.tools?.count)
+      engRef.current?.setFacts(facts)
     } catch (e) {
       setErr('连不上后端：' + String(e).slice(0, 80))
     }
@@ -160,7 +177,7 @@ export function Haloflux({ onExit }: { onExit?: () => void }) {
   const feed = feedRows(snap?.calls || [])
   const code = codeLines(snap?.calls || [])
   const routes = routeRows(snap?.mems || [])
-  const agents = agentCells(snap?.bubbles || [], snap?.mems || [])
+  const agents = agentCells(snap?.bubbles || [], snap?.mems || [], snap?.calls || [])
   const laneCount = useMemo(() => {
     const m: Record<string, number> = {}
     for (const c of cells) m[c.kind] = (m[c.kind] || 0) + 1
@@ -204,6 +221,13 @@ export function Haloflux({ onExit }: { onExit?: () => void }) {
           <button className={mode === 'live' ? 'on' : ''} onClick={() => { setMode('live'); setPicked(null) }}>运行时</button>
           <button className={mode === 'mem' ? 'on' : ''} onClick={() => setMode('mem')}>记忆场</button>
         </div>
+
+        {/* 调参面板：官方 56 参数，右上角浮层，默认收起 */}
+        <Tuner
+          get={() => engRef.current?.getParams() ?? {}}
+          set={(k, v) => engRef.current?.setParam(k, v)}
+          reset={() => engRef.current?.resetParams()}
+        />
 
         {/* 记忆模式左侧的泳道说明：把「怎么读这张图」直接印在图上，不另开一栏 */}
         {mode === 'mem' && (
@@ -282,7 +306,7 @@ export function Haloflux({ onExit }: { onExit?: () => void }) {
           <canvas ref={(el) => { panelRefs.current.val = el }} className="hf-cv" />
         </Panel>
 
-        <Panel h="子智能体 / 派发" cap="在跑的任务 + 记忆类型">
+        <Panel h="子智能体 / 派发" cap="真实工具流水 · 按路聚合">
           <div className="hfx-agents">
             {agents.map((a) => (
               <div key={a.id} className="ag">
