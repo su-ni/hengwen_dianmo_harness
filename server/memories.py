@@ -344,6 +344,44 @@ def half_life_sec(days):
     return max(1.0, float(days))
 
 
+_JIEBA = None
+
+
+def _tokens_of(q):
+    """把一句话切成词。
+
+    **中文没有空格**，原来按空格/标点切，整句会变成一个 token，
+    关键词路（BM25-like）永远匹配不上 —— 实测 tok 恒为 0，等于这一路白占权重。
+    改用 jieba 分词（已装）；它没装时退回「汉字二元组」，仍比整句匹配强。
+    """
+    global _JIEBA
+    q = (q or "").strip()
+    if not q:
+        return []
+    if _JIEBA is None:
+        try:
+            import jieba  # noqa: F401
+            _JIEBA = jieba
+        except Exception:
+            _JIEBA = False
+    if _JIEBA:
+        try:
+            return [w.strip() for w in _JIEBA.lcut(q) if len(w.strip()) > 1 or w.strip().isdigit()]
+        except Exception:
+            pass
+    # 兜底：按标点切 + 汉字二元组
+    out = []
+    for seg in re.split(r"[\s,，。、；：!?？!]+", q):
+        seg = seg.strip()
+        if not seg:
+            continue
+        if re.search(r"[\u4e00-\u9fa5]", seg):
+            out.extend(seg[i:i + 2] for i in range(max(1, len(seg) - 1)))
+        else:
+            out.append(seg)
+    return out
+
+
 def recall(q, workspace_id=None, limit=10, kind=None):
     """多路召回 + 重排（Hindsight 的思路）。
 
@@ -375,7 +413,7 @@ def recall(q, workspace_id=None, limit=10, kind=None):
             pool.sort(key=lambda r: (-(r.get("weight") or 0), r.get("updated_at") or ""))
             return pool[:limit]
 
-        tokens = [w for w in re.split(r"[\s,，。、；：!?？!]+", q) if w]
+        tokens = _tokens_of(q)
         qents = set(extract_entities(q))
 
         # 向量路：query 只算一次，循环里只做点积（每轮对话都要跑这条路，

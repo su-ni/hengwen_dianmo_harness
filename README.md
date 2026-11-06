@@ -165,6 +165,32 @@ $env:MDSA_CONFIG='…\_demo\config.json'; python -m server.main
 | `MDSA_CONFIG` | 指向另一份配置 json，覆盖数据目录与端口（开空白实例） |
 | `STUDYDECK_SILENT_LOG=1` | 输出被有意吞掉的异常（模块 / 行号 / 类型），用于排查 |
 
+## MCP 支持
+
+210 个工具同时以 **Model Context Protocol** 暴露，可被 Claude Desktop、Cline、任意 MCP 客户端调用：
+
+```bash
+python -m server.mcp_server        # stdio 传输，JSON-RPC 2.0
+```
+
+客户端配置：
+
+```json
+{
+  "mcpServers": {
+    "hengwen-dianmo": {
+      "command": "python",
+      "args": ["-m", "server.mcp_server"],
+      "cwd": "/path/to/hengwen-dianmo-harness"
+    }
+  }
+}
+```
+
+协议版本 `2025-11-25`，支持 `initialize` / `tools/list` / `tools/call` / `ping`。
+**不重写任何工具**：每一项都是把已有工具翻译成 MCP 形状，调用走同一个 `tools.call()`，
+权限、审计、工作区过滤全部沿用。
+
 ## 回归测试
 
 ```bash
