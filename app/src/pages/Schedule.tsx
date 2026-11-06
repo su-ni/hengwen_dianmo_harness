@@ -42,6 +42,9 @@ export function Schedule({ base, go }: {
   const [mins, setMins] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const d = wk.data
+  /* 工作区名就是这场学习的名字（「专升本」「考研」「学摄影」…）。
+     拿不到就退回中性说法，不猜是哪场考试。 */
+  const wsName = ((base as any)?.ws?.name || '').trim()
   const per = mins ?? d?.minutes_per_day ?? 150
   const noBasis = d && d.set === false
 
@@ -99,7 +102,9 @@ export function Schedule({ base, go }: {
         <div>
           <div className="k">距考试</div>
           <div className="v">{d?.days_left ?? '—'}<small>天</small></div>
-          <div className="s">{d?.exam_date ? `${d.exam_date} · 广东专升本`
+          {/* 考试名取工作区名，不写死 —— 这个工具是通用的，
+              写死「广东专升本」等于把别处的工作区显示成这一场考试。 */}
+          <div className="s">{d?.exam_date ? `${d.exam_date} · ${wsName || '本场考试'}`
             : quotaMode ? '没定考试日期 —— 只按每日配额排，覆盖率算不出来'
               : '考试日期没定 —— 排不出来'}</div>
         </div>
