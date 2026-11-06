@@ -180,7 +180,7 @@ def requests_missing():
 
 
 def chat(system, user, provider=None, model=None, temperature=None,
-         max_tokens=None, timeout=None, effort=None):
+         max_tokens=None, timeout=None, effort=None, images=None):
     """统一形状 {ok, text, model, reason}。走哪家就把哪家的原因原样带回来。
 
     effort 只对 WorkBuddy 有意义（实测它认 reasoning_effort），别的家传了也没人看。
@@ -190,12 +190,12 @@ def chat(system, user, provider=None, model=None, temperature=None,
     model = model or model_of(provider)
     if provider == "apikey":
         r = llm.chat(system, user, temperature=temperature,
-                     max_tokens=max_tokens, timeout=timeout)
+                     max_tokens=max_tokens, timeout=timeout, images=images)
         r["provider"] = "apikey"
         return r
     r = platform_ai.chat(provider, system, user, model=model,
                          temperature=temperature, max_tokens=max_tokens,
-                         timeout=timeout, effort=effort)
+                         timeout=timeout, effort=effort, images=images)
     r["provider"] = provider
     return r
 

@@ -20,6 +20,7 @@ import json
 import re
 
 from . import config
+from . import vision as _vision
 from . import silent as _silent
 
 try:
@@ -46,7 +47,7 @@ def _post(url, payload, headers, timeout):
                          headers=headers, timeout=timeout)
 
 
-def chat(system, user, temperature=None, max_tokens=None, timeout=None):
+def chat(system, user, temperature=None, max_tokens=None, timeout=None, images=None):
     """调一次模型，返回 {ok, text, model, reason, raw}。
 
     ok=True 时 text 是模型给的原样文本（不做任何清洗）——
@@ -60,11 +61,14 @@ def chat(system, user, temperature=None, max_tokens=None, timeout=None):
         return {"ok": True, "text": _mock_text(user), "model": "mock", "reason": "mock"}
 
     url = config.LLM_BASE_URL.rstrip("/") + "/chat/completions"
+    # 有图就把 user content 换成多模态数组，没图保持字符串 ——
+    # 部分兼容层不接受数组形式，纯文本场景不该冒险。
+    _content, _img_errs = _vision.user_content(user, images)
     payload = {
         "model": config.LLM_MODEL,
         "messages": [
             {"role": "system", "content": system},
-            {"role": "user", "content": user},
+            {"role": "user", "content": _content},
         ],
         "temperature": config.LLM_TEMPERATURE if temperature is None else temperature,
         "max_tokens": config.LLM_MAX_TOKENS if max_tokens is None else max_tokens,

@@ -59,8 +59,14 @@ export function ShotDock({ shot, onClose }: { shot: DockShot | null; onClose: ()
     try {
       /* 与 Chat 完全一致的拼法：人话 + [附件] 真实路径。
          模型侧靠 fs_read 读图，不在这里另造一套附件协议。 */
-      const forModel = (q || '看看这个') + (attach ? '\n\n[附件] ' + attach : '')
-      const r = await callTool<any>('agent_turn', { text: forModel, focus: 'dock' }, { write: true })
+      /* 图片走 images 参数**直接给模型看**，不再只拼一行「[附件] path」。
+         路径同时还留在正文里：万一这一家模型不吃图，模型至少知道有这么一个文件。 */
+      const forModel = q || '看看这张图'
+      const r = await callTool<any>('agent_turn', {
+        text: attach ? forModel + '\n\n[附件] ' + attach : forModel,
+        images: attach ? [attach] : undefined,
+        focus: 'dock',
+      }, { write: true })
       const ans = r.ok ? String(r.data?.text || r.data?.say || '（没回话）') : ('出错了：' + (r.error || '未知'))
       if (!r.ok) setErr(r.error || '出错了')
       setMsgs((m) => {

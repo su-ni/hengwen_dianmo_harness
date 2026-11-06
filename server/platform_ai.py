@@ -27,6 +27,7 @@ import re
 import time
 
 from . import config
+from . import vision as _vision
 from . import silent as _silent
 
 try:
@@ -811,7 +812,7 @@ def last_usage():
     return dict(LAST) if LAST else None
 
 
-def chat(provider, system, user, model=None, temperature=None, max_tokens=None, timeout=None, effort=None):
+def chat(provider, system, user, model=None, temperature=None, max_tokens=None, timeout=None, effort=None, images=None):
     """返回 {ok, text, model, reason}。跟 llm.chat 一个形状，上层不用分叉。"""
     if requests is None:
         return {"ok": False, "reason": "环境里没有 requests，发不出请求", "text": None, "model": None}
@@ -834,10 +835,12 @@ def chat(provider, system, user, model=None, temperature=None, max_tokens=None, 
                 "Origin": "https://www.codebuddy.cn", "Referer": "https://www.codebuddy.cn/",
                 "User-Agent": WB_UA % (WB_FALLBACK_APP_VERSION, WB_FALLBACK_APP_VERSION),
             }
+            # 有图才换多模态数组（见 server/vision.py）
+            _uc, _ie = _vision.user_content(user, images)
             body = {"model": model, "stream": True, "temperature": t,
                     "max_tokens": max_tokens or config.LLM_MAX_TOKENS,
                     "messages": [{"role": "system", "content": system},
-                                 {"role": "user", "content": user}]}
+                                 {"role": "user", "content": _uc}]}
             # 推理模型的思考也是从 max_tokens 里扣的。不显式给思考预算，
             # 它就会在「想完但还没说」的地方被截断 —— 表现是正文空、动作也没落。
             # 认这个字段的上游会按它切，不认的一律静默忽略，所以给上没坏处。

@@ -6287,9 +6287,14 @@ def catalog_text(where=None, focus=None):
 #   看聊过什么（agent_history）、把这段忘掉（agent_reset）。
 # 真正的工具调用走 tools.call —— 也就是这个文件里的全部 113 个，一个不少。
 @tool("agent_turn", config.PERM_NET, "跟助手说一句话：它自己决定要不要调工具")
-def t_agent_turn(text=None, confirmed=None, focus=None, **_):
-    """confirmed 形如 {tool, args}，是人刚点过「确认」的那一步。"""
-    return agent.turn(text, confirmed=confirmed, focus=focus)
+def t_agent_turn(text=None, confirmed=None, focus=None, images=None, **_):
+    """confirmed 形如 {tool, args}，是人刚点过「确认」的那一步。
+
+    images：本地图片路径数组。**直接交给模型看**，不在本地做 OCR ——
+    现在主流模型都有视觉能力，把图发过去比自己识别准。
+    压缩与格式转换在 server/vision.py。
+    """
+    return agent.turn(text, confirmed=confirmed, focus=focus, images=images)
 
 
 @tool("agent_resume", config.PERM_NET,
