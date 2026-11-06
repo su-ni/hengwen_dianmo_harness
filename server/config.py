@@ -231,6 +231,17 @@ def _apply_local_override(cfg):
 
 _apply_local_override(globals())
 
+# ---- 空实例修正 ----
+# DB_PATH / IMPORTED_SOURCES / BACKUP_DIR 在上面是基于 APP_DATA_DIR **算好的**，
+# 而 _apply_local_override() 之后才把 APP_DATA_DIR 换成别的目录 ——
+# 这几个派生路径不重算，空实例就还是在读写正式库（实测：8771 返回 10 条记忆，
+# 而它自己的 data-demo 里 0 张表）。注释写着「空实例靠这个」，实际一直没生效。
+# 有配置才重算；没配置（正常启动）时这几个值跟原来逐字相同，零影响。
+if os.environ.get("MDSA_CONFIG"):
+    DB_PATH = os.path.join(APP_DATA_DIR, "study.db")
+    IMPORTED_SOURCES = os.path.join(APP_DATA_DIR, "sources.json")
+    BACKUP_DIR = os.path.join(APP_DATA_DIR, "backup")
+
 # 用户从 B 站挑进来、当场核过时长的课。不写进 proto_data.json，因为那份是构建产物
 # （铁律：不重跑 build_proto_data.py）；这里还是活的，datahub.proto() 读时合并进来。
 # 必须放在 _apply_local_override 之后：空实例会把 APP_DATA_DIR 换成 data-blank，
