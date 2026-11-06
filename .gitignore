@@ -14,6 +14,8 @@ server/config.local.json
 *.local.json
 .env
 .env.*
+# 模板要入库：赛题要求提交环境变量模板，真值只在 .env / config.local.json
+!.env.example
 config.example.json.bak
 
 # 3) 依赖与虚拟环境
