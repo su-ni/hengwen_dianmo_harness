@@ -4093,3 +4093,43 @@ select.inp-mn:disabled { opacity: .4; cursor: default; }
   border-bottom: 1px solid var(--line);
 }
 .ma-src span:first-child.on { color: var(--ok); }
+
+
+/* ============================================================
+   设置 · 关于
+   ------------------------------------------------------------
+   这一区只回答「这是哪一版、跑在什么上、本机有多少东西」，
+   没有任何操作按钮 —— 所以视觉上也不该有按钮感：
+   大号版本字 + 一排只读数字格，跟上面几区的行式布局区分开。
+   ============================================================ */
+.about-hero {
+  display: flex; align-items: flex-end; gap: 12px;
+  padding: 6px 2px 14px; margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.about-name {
+  font-size: 20px; font-weight: 800; color: var(--tx);
+  letter-spacing: .5px; line-height: 1.15;
+}
+.about-ver { display: flex; align-items: center; gap: 7px; padding-bottom: 2px; }
+.about-ver .v {
+  font-family: var(--mono); font-size: 12px; font-weight: 700;
+  color: var(--act); font-variant-numeric: tabular-nums;
+}
+
+/* 规模数字格：等宽、只读、不抢眼。数字用 tabular-nums，
+   换行时列宽不跳。 */
+.about-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px; padding: 2px 0 6px;
+}
+.about-cell {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px;
+  background: var(--card);
+}
+.about-cell b {
+  font-family: var(--mono); font-size: 15px; font-weight: 800;
+  color: var(--tx); font-variant-numeric: tabular-nums; line-height: 1.1;
+}
+.about-cell span { font-size: 9px; color: var(--tx3); letter-spacing: .4px; }

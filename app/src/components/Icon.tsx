@@ -22,6 +22,8 @@ const P: Record<string, ReactElement> = {
   refresh: <><path d="M14.5 9a5.5 5.5 0 1 1-1.6-3.9" fill="none" /><path d="M14.8 3.4v3.4h-3.4" fill="none" /></>,
   // 底部状态条：计时圈 / 用量堆叠
   clock: <><circle cx="9" cy="9" r="6.4" fill="none" /><path d="M9 5.4V9l2.7 1.6" fill="none" /></>,
+  // 关于：圆圈 + i。「关于」不参与操作，图标也不该有动作感。
+  info: <><circle cx="9" cy="9" r="6.6" fill="none" /><path d="M9 8.2v5" fill="none" /><circle cx="9" cy="5.9" r=".85" /></>,
   stack: <><ellipse cx="9" cy="5.2" rx="5.4" ry="2.1" fill="none" /><path d="M3.6 5.2v7.6c0 1.2 2.4 2.1 5.4 2.1s5.4-.9 5.4-2.1V5.2" fill="none" /><path d="M3.6 9c0 1.2 2.4 2.1 5.4 2.1s5.4-.9 5.4-2.1" fill="none" /></>,
   // 工作区（左栏列表用）：文件夹。跟 courses（课程库的四宫格）分开 ——
   // 「一个工作区」是一个容器，不是一堆东西。
