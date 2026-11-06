@@ -6,6 +6,10 @@ import { SearchModal } from './components/SearchModal'
 import { Bubbles, useBubbles } from './components/Bubbles'
 import { CourseHome } from './pages/CourseHome'
 import { Skel } from './components/V6'
+import { grabViaBus, shotBus } from './lib/shotBus'
+import { callTool } from './lib/api'
+import { useHotkey } from './lib/useHotkey'
+import { ShotDock } from './components/ShotDock'
 
 /* 除课程主页外，每一页都按需下。
    之前所有页面连同画布页的 reactflow 一起打进一个 700KB 的 index.js，
@@ -193,32 +197,59 @@ export function App() {
         不由这里替他决定。
      preventDefault 是必须的：不拦的话浏览器查找栏会跟着弹出来，两层 UI 叠在一起。 */
   const [srchOpen, setSrchOpen] = useState(false)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey
-      if (!mod || (e.key !== 'f' && e.key !== 'F')) return
-      const t = e.target as HTMLElement | null
-      const tag = (t?.tagName || '').toLowerCase()
-      const typing = tag === 'input' || tag === 'textarea' || (t as any)?.isContentEditable
-      if (typing) return
-      /* 已经在搜索页了就别再弹：那一页自己有大输入框，
-         再盖一层居中的弹窗等于把刚搜到的结果挡住。 */
-      if (page === 'search') return
-      e.preventDefault()
-      /* 画布页：Ctrl+F 归画布自己的搜节点框，事件名与 Canvas.tsx 的监听约定为
-         'cv:find'。这里是「通知」而不是「命令」—— 画布是懒加载的，第一次
-         进画布时它可能还没挂上，那一刻没人接这个事件，按下去没有反应。
-         这仍然比跳去全局搜索页更贴近用户的意图：他要找的是节点，
-         不是页面 / 题 / 文件 / 会话。 */
-      if (page === 'canvas') {
-        window.dispatchEvent(new CustomEvent('cv:find'))
-        return
-      }
-      setSrchOpen(true)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+
+  /* 截图置顶小窗：null = 关着。快捷键触发后把图交进来，小窗自动问一轮。
+     小窗与主对话各走各的会话，关掉它不改变主对话停在哪儿。 */
+  const [dockShot, setDockShot] = useState<{ path?: string; title?: string; pos_sec?: number | null } | null>(null)
+
+  /* 快捷键统一走 lib/keys.ts（设置页可改）。这里只保留「按了做什么」，
+     「什么键 / 要不要抢输入框 / 怎么 preventDefault」归 useHotkey。 */
+  useHotkey('search', () => {
+    /* 已经在搜索页了就别再弹：那一页自己有大输入框，
+       再盖一层居中的弹窗等于把刚搜到的结果挡住。 */
+    if (page === 'search') return
+    /* 画布页：Ctrl+F 归画布自己的搜节点框（事件名与 Canvas.tsx 约定 'cv:find'）。
+       这是「通知」不是「命令」—— 画布懒加载，没挂上时按下去没反应，
+       但仍比跳去全局搜索页更贴近意图：他要找的是节点。 */
+    if (page === 'canvas') { window.dispatchEvent(new CustomEvent('cv:find')); return }
+    setSrchOpen(true)
   }, [page])
+
+  /* 截图并提问：课堂页借它自己的抓帧（不复制逻辑），其他页截当前画面。
+     两条路最后都汇到 setDockShot —— 小窗只认「有没有一张图」。 */
+  useHotkey('shotAsk', () => {
+    void (async () => {
+      const r = await grabViaBus()
+      if (r?.ok && r.path) { setDockShot({ path: r.path, title: '课堂截帧' }); return }
+      /* 不在课堂页：让用户自己框一块区域截图（浏览器原生能力），
+         比我们模拟一张整屏更有用，也不需要引入 html2canvas。 */
+      try {
+        const stream = await (navigator.mediaDevices as any).getDisplayMedia({ video: true })
+        const v = document.createElement('video')
+        v.srcObject = stream
+        await v.play()
+        await new Promise((res) => setTimeout(res, 220))
+        const c = document.createElement('canvas')
+        c.width = v.videoWidth; c.height = v.videoHeight
+        c.getContext('2d')?.drawImage(v, 0, 0)
+        stream.getTracks().forEach((t: any) => t.stop())
+        const data = c.toDataURL('image/jpeg', 0.86).replace(/^data:image\/jpeg;base64,/, '')
+        const up = await callTool<any>('shot_save', {
+          data, title: '屏幕截图 ' + new Date().toLocaleTimeString(), w: c.width, h: c.height,
+        }, { write: true })
+        const fp = up.ok ? (up.data?.file || up.data?.path) : null
+        if (fp) setDockShot({ path: fp, title: '屏幕截图' })
+        else setDockShot({ title: '截图失败', pos_sec: null })
+      } catch {
+        /* 用户取消了屏幕共享：什么都不做，静默退出。
+           但如果是环境不支持（比如自动化/无设备），要如实说 —— 静默什么都不发生，
+           用户会以为快捷键坏了。 */
+        if (!(navigator.mediaDevices as any)?.getDisplayMedia) {
+          setDockShot({ title: '这个环境不支持屏幕截图', pos_sec: null })
+        }
+      }
+    })()
+  }, [])
 
   /* 带科目的跳转：点章节 → pick_lesson + 进课堂，课堂要知道是哪门课，
      否则它按自己的默认科目取断点，跳到别的课上去。

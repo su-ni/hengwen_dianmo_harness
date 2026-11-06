@@ -4133,3 +4133,96 @@ select.inp-mn:disabled { opacity: .4; cursor: default; }
   color: var(--tx); font-variant-numeric: tabular-nums; line-height: 1.1;
 }
 .about-cell span { font-size: 9px; color: var(--tx3); letter-spacing: .4px; }
+
+/* ============================================================
+   截图置顶小窗（ShotDock）
+   ------------------------------------------------------------
+   位置固定右下，与气泡错开（气泡在右上）。
+   视觉跟设置页抽屉同一套语法：纯黑底、1px 线、不加阴影堆叠。
+   ============================================================ */
+.sdock {
+  position: fixed; right: 18px; bottom: 18px; z-index: 60;
+  width: min(360px, calc(100vw - 36px));
+  max-height: min(62vh, 520px);
+  display: flex; flex-direction: column;
+  background: rgba(8, 8, 8, .96);
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  backdrop-filter: blur(10px);
+}
+.sdock.min { max-height: none; }
+
+.sdock-hd {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.sdock-hd b { font-size: 11px; font-weight: 800; color: var(--tx); letter-spacing: .3px; }
+.sdock-hd .t {
+  font-family: var(--mono); font-size: 10px; color: var(--act);
+  font-variant-numeric: tabular-nums;
+}
+.sdock-act { margin-left: auto; display: flex; gap: 2px; }
+.sdock-i {
+  display: grid; place-items: center;
+  width: 22px; height: 22px; border-radius: 3px;
+  background: transparent; border: 1px solid transparent; color: var(--tx3);
+  cursor: pointer;
+}
+.sdock-i:hover { color: var(--act); border-color: var(--line2); }
+
+.sdock-pic {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-bottom: 1px solid var(--line); flex: none;
+}
+.sdock-pic img {
+  width: 72px; height: 42px; object-fit: cover;
+  border: 1px solid var(--line2); border-radius: 3px; display: block;
+}
+.sdock-pic span {
+  font-size: 10px; color: var(--tx3); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+
+.sdock-body {
+  flex: 1 1 auto; overflow-y: auto; padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 7px; min-height: 60px;
+}
+.sdock-m {
+  font-size: 12px; line-height: 1.6; color: var(--tx);
+  white-space: pre-wrap; word-break: break-word;
+}
+.sdock-m.user { color: var(--tx3); font-size: 11px; }
+.sdock-m.ai { color: var(--tx); }
+.sdock-m .muted { color: var(--tx3); font-size: 11px; }
+.sdock-err {
+  font-size: 10px; color: var(--bad); padding-top: 3px;
+  border-top: 1px solid var(--line); margin-top: 3px;
+}
+
+.sdock-ft {
+  display: flex; gap: 6px; padding: 8px 10px;
+  border-top: 1px solid var(--line); flex: none;
+}
+.sdock-ft .inp-mn { flex: 1 1 auto; min-width: 0; }
+
+/* 设置 · 快捷键：键帽。
+   看起来要像一颗真的键：等宽字、下边框重一点、按下（录制中）时高亮。 */
+.keycap {
+  font-family: var(--mono); font-size: 11px; font-weight: 700;
+  color: var(--tx); background: var(--card2);
+  border: 1px solid var(--line2); border-bottom-width: 2px;
+  border-radius: 4px; padding: 5px 10px; cursor: pointer;
+  letter-spacing: .3px; white-space: nowrap;
+}
+.keycap:hover { border-color: var(--tx3); }
+.keycap.rec {
+  color: var(--onact); background: var(--act); border-color: var(--act);
+  animation: keycap-pulse 1.1s ease-in-out infinite;
+}
+@keyframes keycap-pulse { 0%,100% { opacity: 1 } 50% { opacity: .62 } }
+
+.sdock-note {
+  padding: 10px 10px; font-size: 11px; line-height: 1.6;
+  color: var(--tx3); border-bottom: 1px solid var(--line);
+}
