@@ -116,7 +116,8 @@ def main():
         d = get("/api/memories")
         ok(d.get("ok") is True, "memories 200")
         s = d.get("stats", {})
-        ok(s.get("total") == 10, "记忆 10 条", s.get("total"))
+        # 不写死条数（灌演示数据后会变），只要求有数据且结构完整
+        ok(isinstance(s.get("total"), int) and s.get("total") > 0, "记忆有数据", s.get("total"))
         ok(s.get("vector", {}).get("backend") == "bge", "向量后端 bge")
         ok(set(s.get("layers", {}).keys()) == {"core", "recall", "archival"}, "三层齐全")
         ok("insight" in [k["k"] for k in s.get("kinds", [])], "insight 已收编")
@@ -149,11 +150,14 @@ def main():
     # ---- 5) 计划模式只读闸（不落库）----
     section("计划模式只读闸")
     try:
+        _before_n = get("/api/memories").get("stats", {}).get("total")
         post("/api/mode", {"mode": "plan"})
         r = tool("memory_add", {"text": "回归探针不该被记住"})
         ok(not r.get("ok"), "plan 模式挡住写记忆", r)
         post("/api/mode", {"mode": "standard"})
-        ok(get("/api/memories").get("stats", {}).get("total") == 10, "没写脏数据")
+        # 写被挡之后条数不该变——按当前实际值比对，不写死
+        _now_n = get("/api/memories").get("stats", {}).get("total")
+        ok(_now_n == _before_n, "计划模式下没写脏数据", (_before_n, _now_n))
     except Exception as e:
         ok(False, "计划模式", str(e))
         try: post("/api/mode", {"mode": "standard"})
