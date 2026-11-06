@@ -7277,6 +7277,30 @@ def t_stream_prefetch(lesson_id=None, subject=None, scope="ahead", count=12, **_
                     % streamer.status().get("cap_gb", 20)}
 
 
+@tool("ai_cost", config.PERM_LOCAL,
+      "AI 用量与成本账本：这个月花了多少 token / 折合多少钱 / 哪家最贵")
+def t_ai_cost(days=30, **_):
+    """成本账本。
+
+    **不新增埋点**：token 一直记在 session_events 的 payload.meta.usage 里，
+    这里只做聚合。单价未配置的来源会标成 null，不拿拍脑袋的数字冒充账单。
+    """
+    from . import cost as _c
+    try:
+        n = int(days or 30)
+    except Exception:
+        n = 30
+    return _c.summary(days=max(1, min(365, n)))
+
+
+@tool("ai_cost_local", config.PERM_LOCAL,
+      "本机算 vs 调模型：判断和检索放在本机省了多少")
+def t_ai_cost_local(**_):
+    """本地优先的账：规则 0 token，模型一次约 800 tokens。"""
+    from . import cost as _c
+    return _c.local_savings()
+
+
 @tool("context_status", config.PERM_LOCAL,
       "这一轮上下文占了窗口多少：拼了几条、折叠了几条、窗宽多大（全是实测数）")
 def t_context_status(**_):
