@@ -5,8 +5,14 @@
 （那时候根本没有「工作区隔离」这回事）。自动回填会把归属关系永久搞错，
 所以做成一个用户主动点的按钮，且只做一次。
 """
+import os
 import sys
-sys.path.insert(0, r"F:\项目\备考专升本\研学台")
+
+# 从本文件位置推仓库根，不写死本机绝对路径 —— 那会把「某台机器上的目录结构」
+# 带进公开仓库，换机器就报错，也泄露了本机布局。
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 from server import store
 

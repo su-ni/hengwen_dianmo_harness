@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""研学台 · 对话 agent。
+"""衡文点墨 HARNESS · 对话 agent。
 
 为什么要有这一层（以及它和 intake 的区别）：
 
@@ -2695,4 +2695,4 @@ def info():
             "provider": model_router.current(), "model": model_router.model_of(),
             "effort": str(store.kv_get(RKV_EFFORT) or "medium"),
             "confirm_tools": sorted(config.CONFIRM_TOOLS),
-            "note": "整个研学台的 %d 个工具都能调；改盘的那几个要你点头。" % len(tools.REGISTRY)}
+            "note": "整个衡文点墨 HARNESS 的 %d 个工具都能调；改盘的那几个要你点头。" % len(tools.REGISTRY)}

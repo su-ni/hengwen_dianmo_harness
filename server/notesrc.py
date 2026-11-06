@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""研学台 · 外部笔记来源接入。
+"""衡文点墨 HARNESS · 外部笔记来源接入。
 
 一句话目标：**别处记的笔记，能原样变成一张导图拿进来。**
 
@@ -514,7 +514,7 @@ def land_notion_image(url, title=None):
     if ext not in IMG_MIME:
         ext = ".png"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "StudyDeck/1.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": "HengwenDianmo-HARNESS/1.0"})
         with urllib.request.urlopen(req, timeout=NET_TIMEOUT) as r:
             raw = r.read(MAX_BYTES + 1)
         if not raw or len(raw) > MAX_BYTES:
@@ -978,7 +978,7 @@ def import_state():
 # ================================================================ HTTP 小工具
 def _http(url, headers=None, data=None, method=None, timeout=NET_TIMEOUT):
     """统一发请求。**任何失败都变成 (None, 原因) 返回**，不抛。"""
-    h = {"User-Agent": "StudyDeck/1.0 (local study app)"}
+    h = {"User-Agent": "HengwenDianmo-HARNESS/1.0 (local study app)"}
     h.update(headers or {})
     body = None
     if data is not None:
