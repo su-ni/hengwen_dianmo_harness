@@ -1412,7 +1412,7 @@ def _asks_in_text(say):
     return None
 
 
-def _ask(sys_p, ctx, temperature=0.3, max_tokens=None, timeout=60, sink=None,
+def _ask(sys_p, ctx, temperature=0.3, max_tokens=None, timeout=60, sink=None, images=None,
          effort=None, think=None):
     # 不传就按配置给：这一份额度是「思考 + 正文」共用的，
     # 写死小数字会把推理模型卡在「想完了但没轮到说」。
@@ -1428,7 +1428,7 @@ def _ask(sys_p, ctx, temperature=0.3, max_tokens=None, timeout=60, sink=None,
          一旦攒出「{"action」就立刻收声，后面的 JSON 一个字都不往外给。
     """
     if sink is None:
-        r = model_router.chat(sys_p, ctx, temperature=temperature,
+        r = model_router.chat(sys_p, ctx, temperature=temperature, images=images,
                               max_tokens=max_tokens, timeout=timeout)
         return bool(r.get("ok")), (r.get("text") or ""), r.get("reason"), r.get("model")
 
@@ -1600,7 +1600,7 @@ def _sys_prompt(eff="medium", focus=None):
 
 
 # ---------------------------------------------------------------- 一轮对话
-def turn(text, confirmed=None, focus=None, sink=None, effort=None, resuming=False):
+def turn(text, confirmed=None, focus=None, sink=None, effort=None, resuming=False, images=None):
     """用户说一句，模型回一句（中间可能调若干工具）。
 
     confirmed: 用户刚点了「确认」的那个工具 {tool, args}，这一轮先把它放行。

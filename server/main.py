@@ -881,6 +881,10 @@ async def api_agent_stream(request: Request):
     focus = body.get("focus") or None
     effort = body.get("effort") or None      # low/medium/high；不传就用上次存的那档
     resuming = bool(body.get("resume"))      # 续跑：把上一轮没干完的活接着干
+    # 图片：本地路径数组，直接交给模型看（不在本机做 OCR）
+    images = body.get("images") or None
+    if images is not None and not isinstance(images, list):
+        images = [str(images)]
 
     import queue as _q
     import threading as _th
@@ -922,7 +926,7 @@ async def api_agent_stream(request: Request):
                     # 续跑不带新话：agent.resume() 自己会把最后那句用户话重放一遍
                     r = agent.resume(sink=sink, effort=effort)
                 else:
-                    r = agent.turn(text, confirmed=confirmed, focus=focus, sink=sink, effort=effort)
+                    r = agent.turn(text, confirmed=confirmed, focus=focus, sink=sink, effort=effort, images=images)
                 # 气泡收尾：要人答 → heavy（可展开直接回复，D21）；否则 done
                 try:
                     from . import bubbles as _bb3
