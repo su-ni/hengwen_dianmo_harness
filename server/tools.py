@@ -6205,6 +6205,7 @@ CATS = [
       "答错", "答对", "做了题", "记录作答", "熟练度", "掌握",
       "他喜欢", "他习惯", "以前说过", "别重复问", "记住我"],
      ["mastery_record", "mastery_list", "judge_train", "judge_status", "judge_reset", "judge_activate",
+      "about",
       "memory_recall", "memory_add", "memory_correct", "memory_search", "memory_list", "memory_drop"]),
 ]
 
@@ -6768,6 +6769,88 @@ def t_agent_effort(level=None, **_):
     r = dict(r)
     r["levels"] = agent.effort()["levels"]
     return r
+
+
+@tool("about", config.PERM_LOCAL,
+      "关于这一版：版本号、技术栈、本机数据规模、构建信息（设置页「关于」读它）")
+def t_about(**_):
+    """关于页的数据源。
+
+    只报能核对的：版本号来自 config，规模数字现查库，运行时长从进程启动算起。
+    **不写「已是最新」这种假结论** —— 自动更新还没做，就别装出做过的样子。
+    """
+    import platform
+    import sys as _sys
+    import time as _time
+
+    out = {
+        "ok": True,
+        "name": config.APP_NAME,
+        "version": config.APP_VERSION,
+        "stage": config.APP_STAGE,
+        "runtime": {
+            "python": "%d.%d.%d" % _sys.version_info[:3],
+            "platform": platform.system(),
+            "pid": os.getpid(),
+        },
+        "stack": [
+            ("前端", "React 19 + TypeScript(strict) + Vite 7"),
+            ("后端", "FastAPI + Uvicorn"),
+            ("存储", "SQLite（WAL）"),
+            ("流式", "SSE"),
+            ("向量", "bge-small-zh-v1.5（本地 512 维）"),
+            ("调度", "FSRS（间隔重复，按天）"),
+        ],
+        "paths": {
+            "data": config.APP_DATA_DIR,
+            "db": config.DB_PATH,
+            "web": config.WEB_DIR,
+        },
+        "counts": {},
+        "note": "自动更新尚未实现：这里只报当前版本，不检查也不提示新版本。",
+    }
+    # 规模统计：查得到就给，查不到就空着 —— 不编数字
+    try:
+        con = store.connect()
+        try:
+            for k, sql in (
+                ("tools", None),
+                ("memories", "SELECT COUNT(*) FROM memories WHERE valid_to IS NULL OR valid_to=''"),
+                ("sessions", "SELECT COUNT(*) FROM sessions"),
+                ("workspaces", "SELECT COUNT(*) FROM workspaces"),
+                ("mastery", "SELECT COUNT(*) FROM mastery"),
+                ("training", "SELECT COUNT(*) FROM training_samples"),
+                ("answers", "SELECT COUNT(*) FROM answers"),
+            ):
+                if sql is None:
+                    out["counts"]["tools"] = len(REGISTRY)
+                    continue
+                try:
+                    out["counts"][k] = con.execute(sql).fetchone()[0]
+                except Exception:
+                    pass
+            try:
+                out["counts"]["db_bytes"] = os.path.getsize(config.DB_PATH)
+            except Exception:
+                pass
+        finally:
+            con.close()
+    except Exception as e:
+        out["counts_error"] = str(e)[:120]
+    # 引擎/模型这类软信息，取不到就不写
+    try:
+        from . import embed as _emb
+        info = _emb.info()
+        out["vector"] = {"backend": info.get("backend"), "dim": info.get("dim"),
+                         "model": info.get("model")}
+    except Exception:
+        pass
+    try:
+        out["model"] = {"provider": model_router.current(),
+                        "name": model_router.model_of()}
+    except Exception:
+        pass
+    return out
 
 
 @tool("agent_info", config.PERM_LOCAL, "这个助手现在能用几个工具、走哪家模型")

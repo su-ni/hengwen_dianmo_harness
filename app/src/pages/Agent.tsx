@@ -31,7 +31,7 @@ type Src = {
   hint?: { field?: string; label?: string; eg?: string; help?: string }
 }
 
-type SecKey = 'account' | 'model' | 'sources' | 'voice' | 'backup' | 'danger'
+type SecKey = 'account' | 'model' | 'sources' | 'voice' | 'backup' | 'about' | 'danger'
 const SECS: { k: SecKey; t: string; icon: string }[] = [
   { k: 'account', t: 'B 站账号', icon: 'sound' },
   { k: 'model', t: '模型接入', icon: 'agent' },
@@ -40,6 +40,9 @@ const SECS: { k: SecKey; t: string; icon: string }[] = [
      主模型负责答话，这个只把人说的话变成字，装不装都不影响聊天。 */
   { k: 'voice', t: '语音输入', icon: 'mic' },
   { k: 'backup', t: '数据与备份', icon: 'stack' },
+  /* 关于单列：版本 / 技术栈 / 本机规模。
+     放最后（危险区之前）—— 它不参与任何操作，只回答「这是哪一版」。 */
+  { k: 'about', t: '关于', icon: 'info' },
   { k: 'danger', t: '危险区', icon: 'trash' },
 ]
 
@@ -71,6 +74,16 @@ export function Agent({ base }: { base: Base }) {
   const pre = useTool<{ presets: Pre[] }>('ai_presets')
   const pq = useTool<{ qn: number; logged_in: boolean }>('play_quality')
   const bsync = useTool<{ on: boolean }>('bili_sync')
+  const ab = useTool<{
+    name?: string; version?: string; stage?: string
+    runtime?: { python?: string; platform?: string; pid?: number }
+    stack?: [string, string][]
+    paths?: { data?: string; db?: string; web?: string }
+    counts?: Record<string, number>
+    vector?: { backend?: string; dim?: number; model?: string }
+    model?: { provider?: string; name?: string }
+    note?: string
+  }>('about')
 
   const [sec, setSec] = useState<SecKey>('account')
   const [msg, setMsg] = useState<string | null>(null)
@@ -555,6 +568,69 @@ export function Agent({ base }: { base: Base }) {
             ) : (
               <div className="set-note">助手跑过工具之后这里才有记录。</div>
             )}
+          </>
+        )}
+
+        {sec === 'about' && (
+          <>
+            <div className="set-h">关于</div>
+            <div className="set-sub">这一版是哪一版、跑在什么上、本机有多少东西。数字都是现查的，查不到就空着。</div>
+
+            <div className="about-hero">
+              <div className="about-name">{ab.data?.name || '衡文点墨 HARNESS'}</div>
+              <div className="about-ver">
+                <span className="v">v{ab.data?.version || '—'}</span>
+                {ab.data?.stage ? <span className={'tg-mn ' + (ab.data.stage === 'release' ? 'ok' : 'im')}>{ab.data.stage}</span> : null}
+              </div>
+            </div>
+
+            <div className="set-group">技术栈</div>
+            {(ab.data?.stack || []).map(([k, v]) => (
+              <Row key={k} title={k} sub={v} />
+            ))}
+
+            <div className="set-group">本机规模</div>
+            <div className="about-grid">
+              {([
+                ['工具', ab.data?.counts?.tools],
+                ['记忆', ab.data?.counts?.memories],
+                ['会话', ab.data?.counts?.sessions],
+                ['工作区', ab.data?.counts?.workspaces],
+                ['熟练度', ab.data?.counts?.mastery],
+                ['训练样本', ab.data?.counts?.training],
+                ['作答', ab.data?.counts?.answers],
+              ] as [string, number | undefined][]).map(([k, v]) => (
+                <div className="about-cell" key={k}>
+                  <b>{v == null ? '—' : v}</b>
+                  <span>{k}</span>
+                </div>
+              ))}
+            </div>
+            {ab.data?.counts?.db_bytes != null ? (
+              <div className="set-foot">
+                库文件 {(ab.data.counts.db_bytes / 1024 / 1024).toFixed(1)} MB
+                {ab.data.vector ? `　·　向量 ${ab.data.vector.backend || '—'} ${ab.data.vector.dim || ''} 维` : ''}
+                {ab.data.model?.name ? `　·　模型 ${ab.data.model.name}` : ''}
+              </div>
+            ) : null}
+
+            <div className="set-group">运行环境</div>
+            <Row title="Python" sub={ab.data?.runtime?.python || '—'} />
+            <Row title="系统" sub={ab.data?.runtime?.platform || '—'} />
+
+            <div className="set-group">路径（本机）</div>
+            <div className="setlogs">
+              <div className="setlog"><span className="n">数据</span><span className="m" style={{ flex: 1, textAlign: 'left' }}>{ab.data?.paths?.data || '—'}</span></div>
+              <div className="setlog"><span className="n">库</span><span className="m" style={{ flex: 1, textAlign: 'left' }}>{ab.data?.paths?.db || '—'}</span></div>
+              <div className="setlog"><span className="n">前端</span><span className="m" style={{ flex: 1, textAlign: 'left' }}>{ab.data?.paths?.web || '—'}</span></div>
+            </div>
+
+            {/* 不写「已是最新」—— 自动更新还没做，就别装出做过的样子。 */}
+            <div className="set-foot">{ab.data?.note || '自动更新尚未实现：这里只报当前版本，不检查也不提示新版本。'}</div>
+
+            <div className="set-group">许可与来源</div>
+            <Row title="本项目" sub="个人项目，仅限学习交流使用。" />
+            <Row title="光环控制台视觉" sub="HALOFLUX（作者 Ryder191），PolyForm Noncommercial 1.0.0；原始声明与 LICENSE 保留在 web/halo/。" />
           </>
         )}
 
