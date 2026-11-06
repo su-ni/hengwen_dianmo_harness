@@ -24,6 +24,8 @@ const P: Record<string, ReactElement> = {
   clock: <><circle cx="9" cy="9" r="6.4" fill="none" /><path d="M9 5.4V9l2.7 1.6" fill="none" /></>,
   // 关于：圆圈 + i。「关于」不参与操作，图标也不该有动作感。
   info: <><circle cx="9" cy="9" r="6.6" fill="none" /><path d="M9 8.2v5" fill="none" /><circle cx="9" cy="5.9" r=".85" /></>,
+  // 快捷键：四个圆角框拼成键盘的样子（比画一整块键盘更小更清楚）
+  cmd: <><rect x="2.4" y="5.2" width="4.2" height="3.6" rx=".9" fill="none" /><rect x="7" y="5.2" width="4" height="3.6" rx=".9" fill="none" /><rect x="11.4" y="5.2" width="4.2" height="3.6" rx=".9" fill="none" /><path d="M3.6 11.6h10.8" fill="none" /></>,
   stack: <><ellipse cx="9" cy="5.2" rx="5.4" ry="2.1" fill="none" /><path d="M3.6 5.2v7.6c0 1.2 2.4 2.1 5.4 2.1s5.4-.9 5.4-2.1V5.2" fill="none" /><path d="M3.6 9c0 1.2 2.4 2.1 5.4 2.1s5.4-.9 5.4-2.1" fill="none" /></>,
   // 工作区（左栏列表用）：文件夹。跟 courses（课程库的四宫格）分开 ——
   // 「一个工作区」是一个容器，不是一堆东西。

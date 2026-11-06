@@ -1,0 +1,22 @@
+截图提问：统一快捷键表 + 置顶小窗（复用现有抓帧/发送链路）
+
+按用户要求「不要多种逻辑做同一件事、UI 能复用就复用」，这轮只做接线不复制逻辑。
+
+1) lib/keys.ts —— 快捷键的唯一事实源
+   原来 Ctrl+F / S / 空格 / 画布 10 个键散在 5 处各写 keydown + 各判输入框。
+   集中成 KEY_DEFS（动作/默认键/是否抢输入框）+ parse/match/comboOf，
+   存 localStorage(sd.keys.v1)，设置页可改。
+2) lib/useHotkey.ts —— 一行接入（30 行）
+3) lib/shotBus.ts —— 让全局快捷键调到课堂页的 grabFrame
+   App ↔ Classroom 通过单槽总线连，不复制抓帧逻辑。
+4) grabFrame 改为返回 {ok,path,error}，供小窗拼 [附件] path
+5) components/ShotDock.tsx —— 置顶小窗
+   新截图自动发一轮（agent_turn + [附件] path，与 Chat 同一套拼法）；
+   独立会话，关掉不影响主对话；可收起；无图时如实说明怎么用。
+6) 设置页新增「快捷键」分区：点键帽即录制、Esc 取消、恢复默认
+   实测 S → Ctrl+Alt+K 生效并持久化，恢复默认清空 localStorage。
+
+收敛结果：App.tsx / Classroom.tsx 手写 keydown 4 处 → 0 处，全部走 useHotkey。
+默认键：全局搜索 Ctrl+F / 截这一帧 S / 截图并提问 Ctrl+Shift+S / 播放暂停 Space。
+
+验证：tsc + build 干净；regress 29/29；设置页 4 条键位正确、录制与恢复实测通过。

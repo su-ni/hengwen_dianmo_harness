@@ -9,6 +9,8 @@ import { delShots, thumbFallback, thumbUrl, fullUrl } from '../lib/herd'
 import { ShapeThumb } from './canvas/ShapeThumb'
 import { BiliLogin } from '../components/BiliLogin'
 import type { Base, Lesson } from '../lib/api'
+import { shotBus } from '../lib/shotBus'
+import { useHotkey } from '../lib/useHotkey'
 
 /* 课堂页 v6：左目录 + 右讲台，这个布局本来就对，不动结构，只换语言。
    v6 的规矩在这页怎么落：
@@ -195,21 +197,21 @@ export function Classroom({ base, goCanvas, initSid }: {
      不给人一点确认，按完只会怀疑按没按上。所以存成功就闪一帧白光（160ms）。
      只在成功时闪：失败还闪等于骗人。 */
   const [flash, setFlash] = useState(0)
-  const grabFrame = useCallback(async () => {
+  const grabFrame = useCallback(async (): Promise<{ ok: boolean; path?: string; error?: string } | null> => {
     const v = vid.current
-    if (!v || !lid) { setShotMsg('先点开播，再截这一帧'); return }
-    if (!v.videoWidth) { setShotMsg('画面还没出来，等一下再截'); return }
+    if (!v || !lid) { setShotMsg('先点开播，再截这一帧'); return { ok: false, error: '没打开播放' } }
+    if (!v.videoWidth) { setShotMsg('画面还没出来，等一下再截'); return { ok: false, error: '画面未就绪' } }
     // 同一秒连按两下 S 会存出两张一模一样的图 —— 库里立刻变噪点。
     // 这一步不写库，只在本地拦，够用且没有额外往返。
     const sec = Math.round(v.currentTime * 100) / 100
     const dup = (refreshShots.data?.shots || []).some((x: any) => x.pos_sec != null && Math.abs(x.pos_sec - sec) < 1.5)
-    if (dup) { setShotMsg(clock(sec) + ' 这一帧已经截过了'); return }
+    if (dup) { setShotMsg(clock(sec) + ' 这一帧已经截过了'); return { ok: false, error: '这一帧已截过' } }
     setShotBusy(true)
     try {
       const c = document.createElement('canvas')
       c.width = v.videoWidth; c.height = v.videoHeight
       const g = c.getContext('2d')
-      if (!g) { setShotMsg('截不了：画布没拿到'); return }
+      if (!g) { setShotMsg('截不了：画布没拿到'); return { ok: false, error: '画布不可用' } }
       g.drawImage(v, 0, 0, c.width, c.height)
       const data = c.toDataURL('image/jpeg', 0.86).replace(/^data:image\/jpeg;base64,/, '')
       const r = await callTool('shot_frame', {
@@ -220,10 +222,16 @@ export function Classroom({ base, goCanvas, initSid }: {
       setShotMsg(r.ok ? '已存 · ' + clock(v.currentTime) + ' · 库里现在 ' + (d.count ?? '?') + ' 张'
         : '截失败：' + (r.error || d.error || '未知原因'))
       if (r.ok) { setFlash((n) => n + 1); refreshShots.run() }
+      return { ok: !!r.ok, path: d?.file || d?.path, error: r.ok ? undefined : (r.error || d.error) }
     } finally { setShotBusy(false) }
+    /* 返回值给「截图并提问」用：它要知道这张图存在哪，好拼 [附件] path。
+       原来 grabFrame 只写界面状态，外部拿不到路径。 */
     /* 依赖里必须带 refreshShots.data：grabFrame 闭包是在上一次渲染里造的，
        不跟着列表更新的话，去重永远看到空数组 —— 表现就是「连按两下存两张」。 */
   }, [lid, sid, les?.title, refreshShots.data])
+
+  /* 注册给全局快捷键用：App 按快捷键时调到这里，不复制抓帧逻辑。 */
+  useEffect(() => { shotBus.grab = () => grabFrame(); return () => { shotBus.grab = null } }, [grabFrame])
 
   // 右栏缩略图点一下 = 回到那一刻；不带秒数的（普通截图）开原图。
   // 这里开的是**新标签页里的原图**（不是灯箱、也不是缩略图）——
@@ -237,34 +245,13 @@ export function Classroom({ base, goCanvas, initSid }: {
     setShotMsg('已跳回 ' + clock(sec))
   }, [])
 
-  // S 键截帧。输入框里打字时不能抢键，否则搜索框里打不出 s。
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 's' && e.key !== 'S') return
-      const t = e.target as HTMLElement | null
-      if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-      e.preventDefault()
-      grabFrame()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [grabFrame])
+  /* 截帧快捷键走统一注册表（设置页可改）。原来这里自己拼 keydown，
+     现在只管「按了要做什么」，「什么键、要不要抢输入框」归 lib/keys.ts。 */
+  useHotkey('shot', () => { void grabFrame() }, [grabFrame])
 
   /* 空格 = 播放/暂停。原生 controls 被我们拿掉之后，浏览器不再管这个键，
      而看课的人按空格是肌肉记忆。输入框里打字不管（不然搜索框打不出空格）。 */
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== ' ' && e.code !== 'Space') return
-      const t = e.target as HTMLElement | null
-      if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return
-      if (!vid.current) return
-      e.preventDefault()
-      togglePlay()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  useHotkey('playToggle', () => { if (vid.current) togglePlay() }, [])
 
   /* 全屏：让【整个播放区】进全屏，不是 <video>。
      视频原生的那颗全屏键只能把 video 丢进 top layer —— 那里面只有一条视频流，

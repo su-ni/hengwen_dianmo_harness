@@ -8,6 +8,7 @@ import { Sel } from '../components/Sel'
 import { takeIntent } from '../lib/intent'
 import { asrStatus, type AsrStatus } from '../lib/recorder'
 import { BiliLogin } from '../components/BiliLogin'
+import { KEY_DEFS, loadKeys, resetKeys, saveKeys, comboOf, type KeyMap } from '../lib/keys'
 
 /* 设置页 v7：配置台，不是仪表盘。
    上一版是「4 个数字 + 三张卡」——四件互不相干的事靠卡片边框隔着，
@@ -31,7 +32,7 @@ type Src = {
   hint?: { field?: string; label?: string; eg?: string; help?: string }
 }
 
-type SecKey = 'account' | 'model' | 'sources' | 'voice' | 'backup' | 'about' | 'danger'
+type SecKey = 'account' | 'model' | 'sources' | 'voice' | 'keys' | 'backup' | 'about' | 'danger'
 const SECS: { k: SecKey; t: string; icon: string }[] = [
   { k: 'account', t: 'B 站账号', icon: 'sound' },
   { k: 'model', t: '模型接入', icon: 'agent' },
@@ -39,6 +40,7 @@ const SECS: { k: SecKey; t: string; icon: string }[] = [
   /* 语音单列一区，不塞进「模型接入」—— 它跟主模型不是两码事里的同一码：
      主模型负责答话，这个只把人说的话变成字，装不装都不影响聊天。 */
   { k: 'voice', t: '语音输入', icon: 'mic' },
+  { k: 'keys', t: '快捷键', icon: 'cmd' },
   { k: 'backup', t: '数据与备份', icon: 'stack' },
   /* 关于单列：版本 / 技术栈 / 本机规模。
      放最后（危险区之前）—— 它不参与任何操作，只回答「这是哪一版」。 */
@@ -100,6 +102,10 @@ export function Agent({ base }: { base: Base }) {
   const [models, setModels] = useState<ModelRow[]>([])
   const [pullMsg, setPullMsg] = useState<string | null>(null)
   const [cfgVal, setCfgVal] = useState('')
+  /* 快捷键表：读一次放 state，改动即时落 localStorage 并让 useHotkey 重读。
+     录制态：正在等用户按键的那一条 */
+  const [keys, setKeys] = useState<KeyMap>(() => loadKeys())
+  const [recKey, setRecKey] = useState<string | null>(null)
   // 清空平台：必须手打「清空」两个字，按钮才亮
   const [wipeWord, setWipeWord] = useState('')
   const [xBusy, setXBusy] = useState(false)
@@ -125,6 +131,24 @@ export function Agent({ base }: { base: Base }) {
     if (it.sec === 'voice') setSec('voice')
     if (it.note) setMsg(it.note)
   }, [])
+
+  /* 录制：按下什么就绑什么。Esc 取消，单独的修饰键不算一次输入。 */
+  useEffect(() => {
+    if (!recKey) return
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.key === 'Escape') { setRecKey(null); return }
+      const combo = comboOf(e)
+      if (!combo) return          // 只按了 Ctrl / Shift，等真正的键
+      const next = { ...keys, [recKey]: combo }
+      setKeys(next)
+      saveKeys(next)
+      setRecKey(null)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [recKey, keys])
 
   async function installAsr(force = false) {
     setAvBusy(true)
@@ -536,6 +560,36 @@ export function Agent({ base }: { base: Base }) {
               装了模型之后，聊天框那颗麦克风就是「点一下开始说，再点一下停」。
               中途点别处、翻讲义、切课程都不会打断 —— 只有点麦克风才会停。
             </div>
+          </>
+        )}
+
+        {sec === 'keys' && (
+          <>
+            <div className="set-h">快捷键</div>
+            <div className="set-sub">点右边的键位就开始录，按下你想用的组合即可。Esc 取消。改完立刻生效，不用重启。</div>
+
+            <div className="set-group">动作</div>
+            {KEY_DEFS.map((d) => (
+              <Row key={d.id} title={d.label} sub={d.desc}
+                act={
+                  <button
+                    className={'keycap' + (recKey === d.id ? ' rec' : '')}
+                    onClick={() => setRecKey(recKey === d.id ? null : d.id)}
+                  >
+                    {recKey === d.id ? '按下新的键…' : (keys[d.id] || d.def)}
+                  </button>
+                } />
+            ))}
+
+            <div className="set-foot">
+              绑在浏览器保留键上（比如 Ctrl+W）会被浏览器先吃掉，换了也不生效。
+              输入框里打字时快捷键一律不抢键 —— 这是故意的，否则笔记里打不出 S。
+            </div>
+
+            <div className="set-group">恢复</div>
+            <Row title="全部恢复默认"
+              sub="把上面每一行改回出厂设置"
+              act={<button className="pbtn-mn ghost" onClick={() => { const k = resetKeys(); setKeys(k); setRecKey(null) }}>恢复默认</button>} />
           </>
         )}
 
