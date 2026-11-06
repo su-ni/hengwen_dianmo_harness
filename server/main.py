@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""研学台 · 服务入口。
+"""衡文点墨 HARNESS · 服务入口。
 
     python -m server.main          # 或  start.bat
     → http://127.0.0.1:8770
@@ -32,7 +32,7 @@ else:
     from . import (agent, asr, bili, config, context, datahub, notesrc, perm, platform_ai,
                    store, streamer, tools, xmind)
 
-app = FastAPI(title="研学台 StudyDeck")
+app = FastAPI(title="衡文点墨 HARNESS")
 
 
 # ---------------------------------------------------------------- 压缩
@@ -1093,7 +1093,7 @@ def _xmind_cb_html(ok, msg):
             "border-radius:14px;padding:28px'>"
             "<h2 style='color:%s;margin:0 0 10px'>%s</h2>"
             "<p style='color:#5b5348;line-height:1.7'>%s</p>"
-            "<p style='color:#8a8172;font-size:13px'>回到研学台，点「拉 XMind 导图」就能同步。</p>"
+            "<p style='color:#8a8172;font-size:13px'>回到衡文点墨 HARNESS，点「拉 XMind 导图」就能同步。</p>"
             "</div></body></html>" % (color, "连上了" if ok else "没连上", msg))
 
 
@@ -1660,7 +1660,7 @@ def main():
     import threading
     import uvicorn
     url = "http://%s:%d/" % (config.HOST, config.PORT)
-    print("研学台 → %s" % url)
+    print("衡文点墨 HARNESS → %s" % url)
     print("（老界面还在：%sold）" % url)
     # 默认不开浏览器：自动化跑测试、起后台服务的时候，突然弹窗会把人从正在干的事上打断。
     # 要开就明确说 —— start.bat 会设 SD_OPEN_BROWSER=1，双击启动照旧弹。

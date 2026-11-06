@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""研学台 · XMind 云端接入（OAuth + MCP）。
+"""衡文点墨 HARNESS · XMind 云端接入（OAuth + MCP）。
 
 端点与授权方式是实测过的，不是猜的：
   GET  https://app.xmind.com/.well-known/oauth-protected-resource
@@ -44,7 +44,7 @@ SCOPE = "openid mcp:connect"
 
 REDIRECT_PATH = "/oauth/xmind/callback"
 REDIRECT_URI = "http://127.0.0.1:%d%s" % (config.PORT, REDIRECT_PATH)
-CLIENT_NAME = "研学台 StudyDeck"
+CLIENT_NAME = "衡文点墨 HARNESS"
 
 MCP_PROTOCOL = "2025-06-18"
 NET_TIMEOUT = 25

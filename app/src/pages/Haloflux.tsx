@@ -367,7 +367,7 @@ function RouteRow({ name, st }: { name: string; st: number }) {
     <>
       <span className="nm">{name}</span>
       {[0, 1, 2].map((i) => (
-        <span key={i}><i className={'chip' + (i < st ? ' done' : i === st ? ' on' : '')} /></span>
+        <span key={i}><i className={'hfx-chip' + (i < st ? ' done' : i === st ? ' on' : '')} /></span>
       ))}
     </>
   )

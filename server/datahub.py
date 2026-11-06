@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""研学台 · 数据中枢。
+"""衡文点墨 HARNESS · 数据中枢。
 
 原则（沿用这个项目的老规矩）：**页面上每个数字都要能追到源头**。
 - 课程 / 词表 / 题库 / 考点卡：只读复用 outputs/proto_data.json 与 workbench/data/*

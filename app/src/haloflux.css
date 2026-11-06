@@ -257,7 +257,11 @@
 }
 .hfx-routes .h { color: var(--tx3); font-weight: 800; letter-spacing: 1px; }
 .hfx-routes .nm { color: var(--tx2); white-space: nowrap; overflow: hidden; }
-.chip {
+/* 面板里的小格子。**必须带前缀** —— 原来叫 .chip，跟聊天页建议语句按钮
+   （chat.css 的 .chip）撞名，而 haloflux.css 在打包顺序里排在后面，
+   把那些按钮全盖成了 11px 高的透明细框：文字挤在中间、卡片样式全没。
+   实测：建议语句那四行变成四条细边框空行。 */
+.hfx-chip {
   display: inline-block;
   width: 100%;
   height: 11px;
@@ -265,8 +269,8 @@
   border-radius: 2px;
   transition: all .3s;
 }
-.chip.on { background: var(--tx); border-color: var(--tx); }
-.chip.done { background: var(--card3); border-color: var(--card3); }
+.hfx-chip.on { background: var(--tx); border-color: var(--tx); }
+.hfx-chip.done { background: var(--card3); border-color: var(--card3); }
 
 /* 7 · 子智能体 */
 .hfx-agents {

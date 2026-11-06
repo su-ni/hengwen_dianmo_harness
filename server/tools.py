@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""研学台 · 工具层。
+"""衡文点墨 HARNESS · 工具层。
 
 设计稿里的 TOOLS 只是一张清单（logTool 只往数组里塞个名字）。
 这里把它们做成真函数：真读数据、真算、真落库、真返回。
@@ -3098,7 +3098,7 @@ def t_ai_refresh(provider=None, **_):
 
 @tool("ai_forget", config.PERM_CONFIRM, "删掉这一家存在本机的登录态")
 def t_ai_forget(provider=None, **_):
-    """退出登录。只删研学台自己存的 data/ai_cred/<provider>.json，
+    """退出登录。只删衡文点墨 HARNESS 自己存的 data/ai_cred/<provider>.json，
     不动平台客户端的任何文件 —— 那是别人的地盘。
     """
     provider = (provider or "").strip().lower()
@@ -3618,7 +3618,7 @@ def t_wrong_words(limit=200, **_):
 def t_review_today(limit=200, workspace_id=None, all_workspaces=False, **_):
     """到期复习队列的取数口子。
 
-    研学台自己的调度写在 config.SM2_INTERVALS（对升一档、错打回 box1）；
+    衡文点墨 HARNESS 自己的调度写在 config.SM2_INTERVALS（对升一档、错打回 box1）；
     「不背单词」只公开了「科学记忆算法」这四个字，公式没公开 —— 所以这里
     不给任何「跟不背单词一样」的说法，只报本机真实的到期数据。"""
     wid = None if all_workspaces else _ws_or(workspace_id)
@@ -4185,7 +4185,7 @@ def _read_bundle(path):
         return None, "同步包读不出来：%s: %s" % (type(e).__name__, e)
     ver = (payload or {}).get("format")
     if ver not in ("studydeck-sync-1",):
-        return None, "这不是研学台的同步包（format=%s）" % ver
+        return None, "这不是衡文点墨 HARNESS 的同步包（format=%s）" % ver
     tables = (payload or {}).get("tables") or {}
     if not isinstance(tables, dict) or not any(tables.values()):
         return None, "同步包里没有学习记录"
@@ -4609,7 +4609,7 @@ def t_note_push_xmind(lesson_id=None, src="local", src_id=None,
         return {"ok": False,
                 "error": u"XMind 工具表里没有「新建导图」这一类，推不上去",
                 "tools": names}
-    body = {"title": title or got.get("map", {}).get("title") or u"研学台导图",
+    body = {"title": title or got.get("map", {}).get("title") or u"衡文点墨导图",
             "content": tree}
     r = xmind.mcp_call(name, body)
     if r.get("error"):

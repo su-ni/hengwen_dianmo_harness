@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""研学台 · 上下文管理（对标 Trae / WorkBuddy 的"记忆"）。
+"""衡文点墨 HARNESS · 上下文管理（对标 Trae / WorkBuddy 的"记忆"）。
 
 为什么需要它：
 

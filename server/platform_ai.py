@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""研学台 · 平台账号模型层（WorkBuddy / Trae）。
+"""衡文点墨 HARNESS · 平台账号模型层（WorkBuddy / Trae）。
 
 为什么单开一个文件，而不是塞进 llm.py：llm.py 只认 OpenAI 兼容的
 /chat/completions，一个 Key 打天下。这两个平台不是那个形状 —— 它们的凭据
@@ -12,7 +12,7 @@
 2. 能复用就复用。机器上已经装过的平台，它的登录态文件在这里直接读出来用 ——
    这就是「不用装平台也能登录」的前半段（装过的人不用再装一次、也不用重新扫码）。
 3. 没装过的人也能进。提供「粘贴一段凭据文本」的入口：把平台那边导出的
-   token / 刷新 token 贴进来即可，研学台自己续期。
+   token / 刷新 token 贴进来即可，衡文点墨 HARNESS 自己续期。
 
 凭据落盘位置：data/ai_cred/<provider>.json，不上传、不进同步包。
 """
@@ -377,7 +377,7 @@ def _trae_from_file():
 # ---------------------------------------------------------------------------
 
 def load_cred(provider):
-    """优先用研学台自己那份（刷新过、或粘贴进来的），没有再去读客户端文件。"""
+    """优先用衡文点墨 HARNESS 自己那份（刷新过、或粘贴进来的），没有再去读客户端文件。"""
     mine = _read_json(_cred_path(provider))
     if isinstance(mine, dict) and (mine.get("accessToken") or mine.get("token")):
         mine.setdefault("source", "studydeck")
@@ -548,7 +548,7 @@ def status(provider):
     base.update({
         "configured": True,
         "usable": bool(cred.get("accessToken") or cred.get("token")),
-        "from": "研学台自己存的（会自己续期）" if mine else "读的是平台上已登录的那份",
+        "from": "衡文点墨 HARNESS 自己存的（会自己续期）" if mine else "读的是平台上已登录的那份",
         "account": _acct_text(cred.get("nickname") or cred.get("account") or ""),
         "expires_at": exp,
         "expires_text": _ts(exp),
