@@ -79,3 +79,12 @@ tests/
 
 # 根目录下划线开头的临时调试脚本（_dbg_*.py / _fix_*.py 这类）
 /_*.py
+
+backup/
+
+# 参赛提交材料 / 本机设计稿与录片脚本：只在本机，不进公开仓库
+提交材料/
+design/
+workbench/
+*.mp4
+*.webm

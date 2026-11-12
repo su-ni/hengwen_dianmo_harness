@@ -1108,6 +1108,63 @@ def api_xmind_logout():
     return {"ok": True, "connected": False}
 
 
+@app.post("/api/tour/pages")
+async def api_tour_pages(request: Request):
+    """让模型判断「这份方案要巡哪些页」，回结构化 JSON 页名数组。
+
+    ★ 模型没接（ENABLE_LLM=false / 没 key）时**如实回 model:false**，
+      前端会回落到关键词规则并在界面上标明「页序是规则推的」——
+      绝不假装用了模型，也绝不编一份页清单。
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    text = str(body.get("text") or "").strip()
+    allowed = body.get("allowed")
+    if not isinstance(allowed, list):
+        allowed = ["home", "today", "classroom", "schedule", "practice", "vocab",
+                   "exam", "stats", "courses", "shots", "notesAll"]
+    if not text:
+        return {"ok": True, "model": False, "pages": [], "reason": "没给方案正文"}
+
+    from . import llm
+    ok, why = llm.available()
+    if not ok:
+        return {"ok": True, "model": False, "pages": [], "reason": why}
+
+    sys_p = (
+        "你是工作区巡游规划器。用户给你一份学习方案正文，和一组允许的页面名。\n"
+        "只输出一个 JSON 数组，元素是页面名字符串，按阅读顺序排列。\n"
+        "不要解释、不要 Markdown、不要输出数组以外的任何字符。\n"
+        "只允许用给定列表里的名字，最多 8 个。至少包含 home。\n"
+        "允许的页面名：" + ", ".join(str(x) for x in allowed)
+    )
+    try:
+        r = await run_in_threadpool(
+            llm.chat, sys_p, "方案正文：\n" + text[:2000],
+            None, 300, 20, None)
+    except Exception as e:
+        return {"ok": True, "model": False, "pages": [], "reason": "模型调用失败：%s" % str(e)[:120]}
+    raw = (r or {}).get("text") or ""
+    m = re.search(r"\[[\s\S]*?\]", raw)
+    if not (r or {}).get("ok") or not m:
+        return {"ok": True, "model": False, "pages": [],
+                "reason": "模型没回可解析的数组：%s" % (r or {}).get("reason", raw[:80])}
+    try:
+        pages = json.loads(m.group(0))
+    except Exception:
+        return {"ok": True, "model": False, "pages": [], "reason": "模型回的不是合法 JSON 数组"}
+    if not isinstance(pages, list):
+        pages = []
+    allow_set = {str(x) for x in allowed}
+    clean = [str(p) for p in pages if str(p) in allow_set][:8]
+    if "home" not in clean:
+        clean.insert(0, "home")
+    return {"ok": True, "model": True, "pages": clean,
+            "model_name": (r or {}).get("model") or ""}
+
+
 @app.post("/api/event")
 async def api_event(request: Request):
     """前端埋点（看视频的秒数、翻卡、切页）。只收白名单 kind，不收任意结构。"""
@@ -1607,6 +1664,28 @@ def _send_range(path, size, request):
                 yield chunk
 
     return StreamingResponse(gen_part(), status_code=206, media_type="video/mp4", headers=hdr)
+
+
+@app.get("/api/nav/current")
+def api_nav_current():
+    """读当前工作区的侧边栏配置；没生成过就回默认全量。"""
+    from . import nav
+    return nav.current()
+
+
+@app.post("/api/nav/generate")
+async def api_nav_generate(request: Request):
+    """写一句需求 → WorkBuddy 生成侧边栏入口 → 双重过滤 → 落库。
+
+    模型调用是同步阻塞的（platform_ai.chat），放线程池，别卡住事件循环。
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    from . import nav
+    text = str(body.get("text") or "")
+    return await run_in_threadpool(nav.generate, text)
 
 
 @app.get("/favicon.ico")

@@ -10,6 +10,13 @@ import { grabViaBus, shotBus } from './lib/shotBus'
 import { callTool } from './lib/api'
 import { useHotkey } from './lib/useHotkey'
 import { ShotDock } from './components/ShotDock'
+import { BuildLayer } from './build/BuildLayer'
+import { useBuild } from './build/useBuild'
+import { onStageCue, exposeStageBus } from './build/stageBus'
+import { tourStart, tourNext, tourInfo, tourStop, exposeTour } from './build/tour'
+import { generateNav, askNavRefresh, shouldRegenerate, exposeNavDebug,
+         readLastNavText, saveLastNavText } from './lib/nav'
+import { Chat } from './components/Chat'
 
 /* 除课程主页外，每一页都按需下。
    之前所有页面连同画布页的 reactflow 一起打进一个 700KB 的 index.js，
@@ -333,11 +340,100 @@ export function App() {
   /* 气泡：挂在最外层，首屏和任何工作区页都能看见（D18 跨工作区）。
      状态来自后端，所以切页/切工作区都不丢。 */
   const bub = useBubbles()
+  /* 造物层：挂最外层，任何工作区页都能演（index 首屏、haloflux 除外）。
+     一个浏览器会话只自动演一次；切页不重演（effect 依赖 enabled，不是 page）。 */
+  const build = useBuild(page !== 'index' && page !== 'haloflux')
+  /* 方案批准后：对话缩成小窗。切到非聊天页时，额外挂一个 mini Chat 保住对话。 */
+  const [stageOn, setStageOn] = useState(false)
+  /* 本次批准的方案正文：用来拼 mini Chat 自动发的那句，
+     也让巡游页序按方案裁剪。 */
+  const [planText, setPlanText] = useState('')
+
+  /* 对话里发一句需求 → 让 WorkBuddy 重新生成侧边栏。
+     ★ 只在「这句话真的在改需求」时才生成：闲聊、追问、批准后的固定
+       执行句、重复同一句都不再白烧一次模型（省 2~3 秒 + 一次调用）。
+     生成期间 Shell 保持上一次配置，不闪空。 */
+  useEffect(() => {
+    let busy = false
+    const h = async (ev: Event) => {
+      const text = String((ev as CustomEvent).detail?.text || '').trim()
+      if (!text || busy) return
+      const last = readLastNavText()
+      if (!shouldRegenerate(text, last)) return
+      busy = true
+      try {
+        const conf = await generateNav(text)
+        /* 只有生成成功才刷新 + 记下这句；失败保持上一版，下次同一句还能重试 */
+        if (conf && conf.items.length) {
+          saveLastNavText(text)
+          askNavRefresh()
+        }
+      } finally {
+        busy = false
+      }
+    }
+    window.addEventListener('sd:nav-request', h as EventListener)
+    exposeNavDebug()
+    return () => window.removeEventListener('sd:nav-request', h as EventListener)
+  }, [])
+
+  /* 方案批准 → 对话缩成小窗 → 自动进工作区造物。
+     批准信号由 PlanCard 经 stageBus 发过来，不层层透传回调。 */
+  useEffect(() => {
+    onStageCue((cue) => {
+      const text = cue.body || ''
+      setPlanText(text)
+      /* 巡游页序按方案正文裁剪：只说找课+排课，就只巡那几页 */
+      tourStart(text)
+      setStageOn(true)
+      document.body.classList.add('build-stage-on')
+      /* 给 Chat 元素自己挂 class，而不是靠 body 后代选择器 */
+      document.querySelectorAll<HTMLElement>('.chat').forEach(el => el.classList.add('build-mini'))
+      /* 巡游第一页固定是 home（满数据课程主页），不管当前在哪一页。
+         ★ 只 setPage，不自己写 location.hash —— 上面那个 [page] effect
+           会同步地址栏；两处都写会和 hashchange 监听打架，实测会把
+           page 顶回 today，小窗就出不来。 */
+      setPage('home')
+      /* 延后一点再开造物：先让 React 把 home 页渲染出来、DOM 落地。
+         用 start() 不用 replay()：后者先 false 再 true，会让 BuildLayer
+         先 destroy 再重建，中间出现一帧全空的页面。 */
+      window.setTimeout(() => build.start(), 140)
+    })
+    exposeStageBus()
+    exposeTour()
+    return () => onStageCue(null)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   if (!base) return <div style={{ padding: 40 }} className="muted">正在读本机数据…</div>
 
   return (
     <>
+    <BuildLayer active={build.active} nonce={build.nonce} page={page}
+      onDone={() => {
+        build.done()
+        /* 一页造完：巡游还有下一页就翻过去继续造，没有就收场 */
+        const next = tourInfo().active ? tourNext() : null
+        if (next) {
+          setPage(next)   // 地址栏由 [page] effect 同步，别自己写 hash
+          /* 等新页 DOM 落地再开造物（不用 replay，避免空窗） */
+          window.setTimeout(() => build.start(), 200)
+          return
+        }
+        tourStop()
+        setStageOn(false)
+        document.body.classList.remove('build-stage-on')
+        document.querySelectorAll<HTMLElement>('.chat.build-mini')
+          .forEach(el => el.classList.remove('build-mini'))
+      }} />
+    {/* 造物期间，切到非聊天页后额外挂一个对话小窗。
+        ★ 纯展示：不 autoSend、不另起一轮。批准那句由原 Chat 发，
+          两边读同一份 agent_history，内容自然一致。 */}
+    {stageOn && page !== 'today' && page !== 'index' ? (
+      <div className="build-mini-host">
+        <Chat page="today" wsKey={((base as any)?.ws || {}).id || ''} hideSessBar />
+      </div>
+    ) : null}
     {/* 右上角气泡：**只在非聊天页出现**。
         首屏（index）和会话页（home）本身就是 AI 聊天的地方 ——
         在那里它已经在回答你、在等你了，再弹一个气泡就是重复打扰。
@@ -351,8 +447,16 @@ export function App() {
         items={bub.items}
         onRefresh={bub.pull}
         onJump={(b) => {
-          if (b.session_id) setSid(b.session_id)
-          setPage('home')
+          /* 回到会话 = 切到对话页 today，并让 Chat 换到那条会话。
+             ★ 原来 setPage('home') 跳到课程主页（压根不是对话），
+               而且把 b.session_id（会话 id）塞进 sid（科目 id），两处都错。
+             Chat 可能刚挂载、事件监听还没注册，所以延后一拍发。 */
+          setPage('today')
+          /* 地址栏交给 [page] effect 同步，双写会和 hashchange 打架 */
+          if (b.session_id) {
+            window.setTimeout(() => window.dispatchEvent(
+              new CustomEvent('sd:switch-session', { detail: { sid: b.session_id } })), 120)
+          }
         }}
       />
     ) : null}

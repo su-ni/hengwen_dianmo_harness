@@ -3447,6 +3447,15 @@ select.inp-mn:disabled { opacity: .4; cursor: default; }
   border-radius: 2px;
   background: var(--act);
 }
+/* 侧边栏来源标识：如实标 AI / 规则 / 默认，不抢视觉 */
+.rail-icons .rail-src {
+  flex: none; text-align: center; padding: 5px 0 7px;
+  font-size: 9px; letter-spacing: 0.08em;
+  color: var(--tx3); opacity: 0.65;
+  border-top: 1px solid var(--line);
+  margin-top: 6px;
+}
+.rail-icons .rail-src:hover { opacity: 1; }
 
 /* ===================== 顶栏：当前课程 + 视图胶囊 + 家底 =====================
    科目只在顶栏这一处切换 —— 左栏没科目，页面里也不许再放科目下拉。

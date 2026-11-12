@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Icon } from './Icon'
 import { md } from '../md'
+import { fireStageCue } from '../build/stageBus'
 
 /* 计划文档卡：计划模式产出的方案，摆在对话流里等人点头。
  *
@@ -55,6 +56,27 @@ export function PlanCard({
         body: JSON.stringify({ status }),
       })
       onDecide?.(doc.id, status)
+      /* 批准 = 开始执行。发信号让外层把对话缩成小窗、进工作区造物。
+         丢弃（dropped）不触发。
+         ★ 带上方案正文：巡游页序按它裁剪、mini Chat 的批准那句也按它拼。
+           没展开过卡片时 body 是空的，这里补拉一次。 */
+      if (status === 'approved') {
+        let text = body || doc.body || ''
+        if (!text) {
+          try {
+            const d = await fetch('/api/plan-doc/' + encodeURIComponent(doc.id))
+              .then(r => r.json()).catch(() => null)
+            text = d?.doc?.body || ''
+          } catch { /* 拉不到就留空，tour 退回全量 */ }
+        }
+        /* 延后发：onDecide 里原 Chat 的 send('按这个方案开始做') 是
+           60ms 后发起的，得先让那条 SSE 建立起来再切页，
+           否则切页把 Chat 卸载时请求还没发出去。 */
+        window.setTimeout(() => fireStageCue({
+          docId: doc.id, title: doc.title || '方案',
+          body: text || undefined, at: Date.now(),
+        }), 200)
+      }
     } finally {
       setBusy(false)
     }

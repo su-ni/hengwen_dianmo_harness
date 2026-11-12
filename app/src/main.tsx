@@ -22,6 +22,7 @@ import './bubbles.css'
 import './ui.css'
 import './v6.css'
 import './motion.css'
+import './build/build.css'
 import { App } from './App'
 
 createRoot(document.getElementById('root')!).render(

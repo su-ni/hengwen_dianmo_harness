@@ -4,6 +4,7 @@ import { useTool } from '../lib/useTool'
 import { clsColor } from '../components/V6'
 import { BiliLogin } from '../components/BiliLogin'
 
+
 /* 课程主页（docs/style-A-dark.html 定稿）：
    进去先看「这门课长什么样」——多少讲、多少小时、学到哪、这一讲接着看什么、
    哪几章、有哪些题源；右栏是家底、走完多少、缺什么。
@@ -188,13 +189,16 @@ export function CourseHome({ base, sid, onGo }: {
     <section className="chome">
       <header className="chome-head">
         <div className="chome-headmain">
-        <div className="kick">{score >= 200 ? '专业综合课' : '公共课'} · {score ? score + ' 分' : '不计分'}</div>
-        <h1>{nmA}{nmB ? <em>{nmB}</em> : null}</h1>
-        <div className="facts">
-          <div className="d"><b>{total}</b>讲</div><span className="sep" />
-          <div className="d"><b>{hours ? hours.toFixed(1) : '—'}</b>小时</div><span className="sep" />
-          <div className="d"><b>{done}</b>讲已学</div><span className="sep" />
-          <div className="d"><b>{pct ? (pct < 1 ? pct.toFixed(1) : Math.round(pct)) : 0}</b>%</div>
+        <div className="kick" data-k="kick" data-say="先写清这是哪一类课、值多少分" data-tool="list_subjects"
+             data-x>{score >= 200 ? '专业综合课' : '公共课'} · {score ? score + ' 分' : '不计分'}</div>
+        <h1 data-k="h1" data-say="把课程名摆上去" data-tool="list_subjects" data-grow="1" data-edit="1">
+          <span data-x>{nmA}</span>{nmB ? <em><span data-x>{nmB}</span></em> : null}
+        </h1>
+        <div className="facts" data-k="facts" data-say="四格数字：讲次 / 时长 / 已学 / 百分比" data-tool="stats_overview">
+          <div className="d"><b data-x>{total}</b><span data-x>讲</span></div><span className="sep" />
+          <div className="d"><b data-x>{hours ? hours.toFixed(1) : '—'}</b><span data-x>小时</span></div><span className="sep" />
+          <div className="d"><b data-x>{done}</b><span data-x>讲已学</span></div><span className="sep" />
+          <div className="d"><b data-x>{pct ? (pct < 1 ? pct.toFixed(1) : Math.round(pct)) : 0}</b><span data-x>%</span></div>
         </div>
         </div>
       </header>
@@ -202,28 +206,30 @@ export function CourseHome({ base, sid, onGo }: {
       <div className="chome-body">
         <div className="chome-main">
           {curLesson ? (
-            <div className="chome-hero">
-              <div className="k">接着学</div>
-              <h2>{curLesson.title}</h2>
-              <div className="meta">
-                <span>{curLesson.chapter || '未分组'} · {(curChap?.lessons || []).length} 讲</span>
-                <span>{curLesson.dur ? Math.round(curLesson.dur / 60) + ' 分钟' : '时长未记'}</span>
-                <span>上次看到 {clock(cur.data?.pos_sec)}</span>
+            <div className="chome-hero" data-k="hero" data-say="立「接着学」这块主卡" data-tool="get_current_lesson" data-guide="1">
+              <div className="k" data-k="heroK" data-x>接着学</div>
+              <h2 data-k="heroH2" data-say="填这一讲的标题" data-tool="get_current_lesson"><span data-x>{curLesson.title}</span></h2>
+              <div className="meta" data-k="heroMeta" data-say="挂三颗胶囊：章节、时长、上次看到哪" data-tool="get_current_lesson">
+                <span data-x>{curLesson.chapter || '未分组'} · {(curChap?.lessons || []).length} 讲</span>
+                <span data-x>{curLesson.dur ? Math.round(curLesson.dur / 60) + ' 分钟' : '时长未记'}</span>
+                <span data-x>上次看到 {clock(cur.data?.pos_sec)}</span>
               </div>
-              <div className="ft">
-                <button className="cbtn" onClick={() => onGo('classroom', { sid: realId })}>继续看 →</button>
-                <button className="cbtn gh" onClick={() => onGo('classroom', { sid: realId })}>看讲次目录</button>
-                <span className="rt">本讲 {covers.length ? covers.length + ' 个考点' : '没有对应考点'}</span>
+              <div className="ft" data-k="heroFt" data-say="放两个按钮：继续看 / 看目录" data-tool="get_current_lesson">
+                <button className="cbtn" data-x onClick={() => onGo('classroom', { sid: realId })}>继续看 →</button>
+                <button className="cbtn gh" data-x onClick={() => onGo('classroom', { sid: realId })}>看讲次目录</button>
+                <span className="rt" data-x>本讲 {covers.length ? covers.length + ' 个考点' : '没有对应考点'}</span>
               </div>
             </div>
           ) : (
-            <div className="chome-hero empty">
-              <div className="k">还没有断点</div>
-              <h2>{total ? '从第一章第一讲开始' : '这门课还没有讲次'}</h2>
-              <div className="meta"><span>{total ? total + ' 讲等着' : '让助手去 B 站找一门，或去设置里手动导'}</span></div>
-              <div className="ft">
-                {total ? <button className="cbtn" onClick={() => openChap(groups[0])}>从第一讲开始 →</button> : null}
-                <button className="cbtn gh" onClick={() => onGo('classroom', { sid: realId })}>去课堂</button>
+            <div className="chome-hero empty" data-k="hero" data-say="立「接着学」这块主卡" data-tool="get_current_lesson" data-guide="1">
+              <div className="k" data-k="heroK" data-x>还没有断点</div>
+              <h2 data-k="heroH2" data-say="填这一讲的标题" data-tool="get_current_lesson"><span data-x>{total ? '从第一章第一讲开始' : '这门课还没有讲次'}</span></h2>
+              <div className="meta" data-k="heroMeta" data-say="挂三颗胶囊" data-tool="get_current_lesson">
+                <span data-x>{total ? total + ' 讲等着' : '让助手去 B 站找一门，或去设置里手动导'}</span>
+              </div>
+              <div className="ft" data-k="heroFt" data-say="放两个按钮" data-tool="get_current_lesson">
+                {total ? <button className="cbtn" data-x onClick={() => openChap(groups[0])}>从第一讲开始 →</button> : null}
+                <button className="cbtn gh" data-x onClick={() => onGo('classroom', { sid: realId })}>去课堂</button>
               </div>
             </div>
           )}
@@ -232,14 +238,14 @@ export function CourseHome({ base, sid, onGo }: {
               以前这两块只有一行小标题浮在页底，跟右栏的家底挤成一片灰字 ——
               一屏看下去没有边界，人找不到「这一块是什么」。框和接着学同规格：
               var(--card) 底 + 1px 边 + 14 圆角，靠留白分组，不靠阴影。 */}
-          <div className="chome-pan">
-          <div className="chome-pan-h">
-            <h3>{groups.length} 章</h3>
-            <span>{total} 讲 · {hours ? hours.toFixed(1) : '—'} 小时</span>
+          <div className="chome-pan" data-k="chas" data-say="开讲次目录这一栏" data-tool="list_lessons">
+          <div className="chome-pan-h" data-k="chasH">
+            <h3 data-x>{groups.length} 章</h3>
+            <span data-x>{total} 讲 · {hours ? hours.toFixed(1) : '—'} 小时</span>
           </div>
           {groups.length ? (
             <div className="chome-chs">
-              {groups.map((g) => {
+              {groups.map((g, gi) => {
                 const ls = g.lessons || []
                 const dn = ls.filter((l) => l.done).length
                 const mins = Math.round(ls.reduce((a, l) => a + (l.dur || 0), 0) / 60)
@@ -247,65 +253,69 @@ export function CourseHome({ base, sid, onGo }: {
                 const on = (g.lessons || []).some((l) => l.id === curLesson?.id)
                 return (
                   <button key={g.chapter} className={'chome-cr' + (on ? ' on' : '')} onClick={() => openChap(g)}
-                    title={'进这一章：' + g.chapter}>
-                    <span className="ix">{g.chapter}</span>
+                    title={'进这一章：' + g.chapter}
+                    data-k={'ch' + gi} data-dup={gi > 0 ? '1' : undefined}
+                    data-say={gi === 0 ? '铺第一章' : '把上一章复制下来，再拖到位'} data-tool="list_lessons">
+                    <span className="ix" data-x>{g.chapter}</span>
                     <span className="b"><i style={{ width: p + '%' }} /></span>
-                    <span className="n">{dn}/{ls.length}</span>
-                    <span className="t">{mins ? mins + ' 分' : '—'}</span>
+                    <span className="n" data-x>{dn}/{ls.length}</span>
+                    <span className="t" data-x>{mins ? mins + ' 分' : '—'}</span>
                   </button>
                 )
               })}
             </div>
           ) : (
-            <div className="chome-none">这门课还没有讲次目录。可以在课堂页跟助手说「我想学 XXX」，它会找到整门课并落进本机。</div>
+            <div className="chome-none" data-k="chNone" data-x>这门课还没有讲次目录。可以在课堂页跟助手说「我想学 XXX」，它会找到整门课并落进本机。</div>
           )}
           </div>
 
-          <div className="chome-pan">
-          <div className="chome-pan-h">
-            <h3>题源</h3>
-            <span>{srcAll.length} 个 · {srcTotal} 题</span>
+          <div className="chome-pan" data-k="src" data-say="再开题源这一栏" data-tool="list_item_sources">
+          <div className="chome-pan-h" data-k="srcH">
+            <h3 data-x>题源</h3>
+            <span data-x>{srcAll.length} 个 · {srcTotal} 题</span>
           </div>
           {srcAll.length ? (
             <div className="chome-src">
-              {srcAll.map((s) => (
-                <button key={s.id} className="chome-sr" onClick={() => onGo('practice', { sid: realId })}>
+              {srcAll.map((s, si) => (
+                <button key={s.id} className="chome-sr" onClick={() => onGo('practice', { sid: realId })}
+                  data-k={'src' + si} data-dup={si > 0 ? '1' : undefined}
+                  data-say={si === 0 ? '挂第一份题源' : '复制一份题源行'} data-tool="list_item_sources">
                   <span className="dot" style={{ background: clsColor(sub?.cls || sub?.accent || realId) }} />
-                  <span className="nm">{s.name}</span>
-                  <span className="n">{s.total} 题 · {s.kind === 'blank' ? '填空' : s.kind === 'short' ? '简答' : '单选'}</span>
-                  <span className="go">去练 →</span>
+                  <span className="nm" data-x>{s.name}</span>
+                  <span className="n" data-x>{s.total} 题 · {s.kind === 'blank' ? '填空' : s.kind === 'short' ? '简答' : '单选'}</span>
+                  <span className="go" data-x>去练 →</span>
                 </button>
               ))}
             </div>
           ) : (
-            <div className="chome-none">这一科还没有题源。可以让助手去拉一份，或者在练习页按「按这一科出 3 题」生成。</div>
+            <div className="chome-none" data-k="srcNone" data-x>这一科还没有题源。可以让助手去拉一份，或者在练习页按「按这一科出 3 题」生成。</div>
           )}
           </div>
         </div>
 
         <aside className="chome-side">
-          <div className="pan">
-            <h4>家底</h4>
+          <div className="pan" data-k="fen" data-say="右栏家底：分值、讲次、时长、可播" data-tool="stats_overview">
+            <h4 data-x>家底</h4>
             {/* 分母不能写死 —— 以前是 /500，哪天加一门课这个数就变成假的。
                 分母 = 当前导入的、有分值的课加起来的总分（C 语言这类不计分的不算进去）。 */}
-            <div className="rw big"
+            <div className="rw big" data-x
               title={scoreSum ? '全部导入的课加起来 ' + scoreSum + ' 分' : undefined}>
               <span>分值</span><b>{score ? score + ' / ' + scoreSum : '不计分'}</b>
             </div>
-            <div className="rw"><span>讲次</span><b>{total}</b></div>
-            <div className="rw"><span>总时长</span><b>{hours ? hours.toFixed(1) + ' 小时' : '—'}</b></div>
-            <div className="rw"><span>可播</span><b>{playable} / {total}</b></div>
+            <div className="rw" data-x><span>讲次</span><b>{total}</b></div>
+            <div className="rw" data-x><span>总时长</span><b>{hours ? hours.toFixed(1) + ' 小时' : '—'}</b></div>
+            <div className="rw" data-x><span>可播</span><b>{playable} / {total}</b></div>
             {/* 「能秒开」= 本机已经有合好的 mp4，点开就播、不用等合流。
                 这个数是文件数点出来的（stream_status 真去 stat），不是估的。 */}
-            <div className="rw" title="这些讲已经合成本机 mp4，点开就播；其余第一次要合十几秒">
+            <div className="rw" data-x title="这些讲已经合成本机 mp4，点开就播；其余第一次要合十几秒">
               <span>能秒开</span><b>{ss.data ? (ss.data.cached + ' / ' + ss.data.total) : '—'}</b>
               {ss.data?.pending ? <em className="warm">后面还有 {ss.data.pending} 讲在合</em> : null}
             </div>
             <BiliLogin />
           </div>
 
-          <div className="pan">
-            <h4>走完多少</h4>
+          <div className="pan" data-k="ring" data-say="画进度环" data-tool="stats_overview">
+            <h4 data-x>走完多少</h4>
             <div className="ring">
               <div className="t">
                 <svg width="76" height="76" viewBox="0 0 76 76" aria-hidden="true">
@@ -317,17 +327,17 @@ export function CourseHome({ base, sid, onGo }: {
                 {pct ? (pct < 1 ? pct.toFixed(1) : Math.round(pct)) : 0}%
               </div>
               <div className="lg">
-                <b>{done} / {total} 讲</b>
-                <i>{done >= total && total ? '这一门走完了' : (days ? '剩下的按每天 2 小时\n还要 ' + days + ' 天' : '还没有可播的讲次')}</i>
+                <b data-x>{done} / {total} 讲</b>
+                <i data-x>{done >= total && total ? '这一门走完了' : (days ? '剩下的按每天 2 小时\n还要 ' + days + ' 天' : '还没有可播的讲次')}</i>
               </div>
             </div>
           </div>
 
-          <div className={'miss' + (miss.length ? '' : ' none')}>
-            <h4>{miss.length ? '缺什么' : '没发现缺口'}</h4>
+          <div className={'miss' + (miss.length ? '' : ' none')} data-k="miss" data-say="最后写「缺什么」" data-tool="stats_overview">
+            <h4 data-x>{miss.length ? '缺什么' : '没发现缺口'}</h4>
             {miss.length
-              ? miss.map((m) => <li key={m}>{m}</li>)
-              : <li>题源、讲次、播放源都在</li>}
+              ? miss.map((m) => <li key={m} data-x>{m}</li>)
+              : <li data-x>题源、讲次、播放源都在</li>}
           </div>
         </aside>
       </div>

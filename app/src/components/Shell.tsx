@@ -5,6 +5,7 @@ import { clsColor } from './V6'
 import { Sel } from './Sel'
 import { type Base } from '../lib/api'
 import { useTool } from '../lib/useTool'
+import { fetchNav, defaultNav, NAV_ICON, NAV_REFRESH, type NavConfig } from '../lib/nav'
 
 export type PageKey =
   | 'index' | 'home' | 'today' | 'classroom' | 'courses' | 'schedule' | 'vocab'
@@ -60,6 +61,26 @@ const COURSE_TABS_FIXED: { k: PageKey; t: string }[] = [
 const NO_COURSE_TABS: PageKey[] = ['today', 'courses', 'exam', 'stats', 'canvas', 'agent', 'notesAll', 'shots']
 
 export const NAV: NavItem[] = ICON_NAV.concat(ICON_NAV_TAIL).map((x) => ({ k: x.k, t: x.t, n: x.n }))
+
+/* ============================================================================
+   AI 自组织侧边栏
+   写死的 ICON_NAV / ICON_NAV_TAIL / COURSE_TABS_FIXED 只当「默认全量」兜底。
+   真正渲染的是后端生成的 conf：模型自己编名字与顺序，且只有「相关 + 有数据」
+   的入口才会出现在配置里。
+   ============================================================================ */
+const RAIL_TAIL_KEYS = new Set<string>(['exam', 'stats', 'courses', 'canvas', 'shots', 'skills', 'haloflux', 'agent'])
+
+function useNavConfig(): NavConfig {
+  const [conf, setConf] = useState<NavConfig>(defaultNav)
+  useEffect(() => {
+    let alive = true
+    const load = () => { fetchNav().then(c => { if (alive) setConf(c) }) }
+    load()
+    window.addEventListener(NAV_REFRESH, load)
+    return () => { alive = false; window.removeEventListener(NAV_REFRESH, load) }
+  }, [])
+  return conf
+}
 
 export const TITLES: Record<PageKey, { kick: string; h1: string; sub: string }> = {
   home: { kick: '课程', h1: '这门课', sub: '' },
@@ -176,12 +197,17 @@ export function Shell({
   /* 这门课要不要背单词：后端按词表归属算（datahub.vocab_owner）。
      高数没有词表，就不出现这一项 —— 不是前端写死一份名单。 */
   const hasVocab = !!cur?.has_vocab
-  const tabs = hasVocab ? COURSE_TABS_FIXED.concat([{ k: 'vocab' as PageKey, t: '背单词' }]) : COURSE_TABS_FIXED
+  /* AI 生成的配置：左栏按它渲染，顶栏胶囊也按它渲染。
+     配置里没有的入口一律不出现 —— 这就是「有对应内容才显示入口」。 */
+  const navConf = useNavConfig()
+  const railMain = navConf.items.filter(x => !RAIL_TAIL_KEYS.has(x.key))
+  const railTail = navConf.items.filter(x => RAIL_TAIL_KEYS.has(x.key))
+  /* 顶栏胶囊：配置里的 tabs；带 vocab 时还要本机真有词书（hasVocab） */
+  const tabs = navConf.tabs.filter(x => x.key !== 'vocab' || hasVocab)
   /* 哪些页不显示这排胶囊：全局页与工具页（见 NO_COURSE_TABS），
-     「从左栏进来的背单词」—— 那一页看的是全部词书，不属于任何一门课，
      以及一门课都没有的时候（空库）—— 那排 tab 点了也没有内容可切。 */
   const showTabs = subs.length > 0 && NO_COURSE_TABS.indexOf(page) < 0
-    && (page !== 'vocab' || hasVocab)
+    && (page !== 'vocab' || hasVocab) && tabs.length > 0
 
   return (
     <div className="app app-mn app-icons">
@@ -192,24 +218,34 @@ export function Shell({
           <Logo size={26} tone="white" />
         </div>
         <nav className="railnav">
-          {ICON_NAV.map((it) => (
-            <button key={it.k} className={'rb' + (page === it.k ? ' on' : '')}
-              title={it.t} aria-label={it.t}
-              onClick={() => onGo(it.k, { sid, entry: 'rail' })}>
-              <Icon n={it.n} size={16} />
+          {railMain.map((it) => (
+            <button key={it.key} className={'rb' + (page === it.key ? ' on' : '')}
+              title={it.label + (it.why ? ' · ' + it.why : '')} aria-label={it.label}
+              onClick={() => onGo(it.key, { sid, entry: 'rail' })}>
+              <Icon n={NAV_ICON[it.key] || 'courses'} size={16} />
             </button>
           ))}
         </nav>
         <div className="sp" />
         <nav className="railnav">
-          {ICON_NAV_TAIL.map((it) => (
-            <button key={it.k} className={'rb' + (page === it.k ? ' on' : '')}
-              title={it.t} aria-label={it.t}
-              onClick={() => onGo(it.k)}>
-              <Icon n={it.n} size={16} />
+          {railTail.map((it) => (
+            <button key={it.key} className={'rb' + (page === it.key ? ' on' : '')}
+              title={it.label + (it.why ? ' · ' + it.why : '')} aria-label={it.label}
+              onClick={() => onGo(it.key)}>
+              <Icon n={NAV_ICON[it.key] || 'courses'} size={16} />
             </button>
           ))}
         </nav>
+        {/* 来源如实标：AI / 规则兜底 / 默认全量。不弹窗、不抢位置 */}
+        <div className="rail-src" title={
+          navConf.source === 'ai'
+            ? '入口由 ' + (navConf.model || 'WorkBuddy') + ' 生成'
+            : navConf.source === 'rules'
+              ? '模型不可用，回落规则：' + (navConf.reason || '')
+              : '还没生成过，显示默认全量'
+        }>
+          {navConf.source === 'ai' ? 'AI' : navConf.source === 'rules' ? '规则' : '默认'}
+        </div>
       </aside>
 
       <div className="main">
@@ -252,9 +288,10 @@ export function Shell({
           {showTabs ? (
             <div className="tvt" role="tablist" aria-label="这门课的视图">
               {tabs.map((x) => (
-                <button key={x.k} role="tab" aria-selected={page === x.k}
-                  className={page === x.k ? 'on' : ''}
-                  onClick={() => onGo(x.k, { sid, entry: 'tab' })}>{x.t}</button>
+                <button key={x.key} role="tab" aria-selected={page === x.key}
+                  className={page === x.key ? 'on' : ''}
+                  title={x.why || undefined}
+                  onClick={() => onGo(x.key, { sid, entry: 'tab' })}>{x.label}</button>
               ))}
             </div>
           ) : null}

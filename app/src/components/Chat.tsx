@@ -18,6 +18,7 @@ import { AskBox, type Ask, type AskOpt, type AskGroup } from './AskBox'
 import { ModePicker } from './ModePicker'
 import { PlanCard as PlanDocCard, type PlanDoc } from './PlanCard'
 import { streamAgent, type StreamEvent } from '../lib/agentStream'
+import { pushLive } from '../build/liveBus'
 
 /* ================= 今日页：一个能聊的助手 =================
 
@@ -872,8 +873,12 @@ export function Chat({
   hideSessBar,
   onTool,
   onRun,
+  autoSend,
 }: {
   page: string
+  /* 造物小窗专用：挂载后自动发这句，让方案批准后的 Agent 真跑一轮工具。
+     只给那个独立 mini 实例用 —— 主 Chat 走用户手输，不自动发。 */
+  autoSend?: string
   /* 工具轨迹回调：给外层（首屏右栏可视化面板）用。
      Chat 自己会在消息流里画「思考 / 工具调用」那几行 —— 那是复用，
      外层要的是同一份数据的**更详细的图形**，所以从这里把轨迹传出去，
@@ -946,6 +951,19 @@ export function Chat({
      所以切页、点别处、Chat 整个卸载都不会打断录音；只有点麦克风才会停。 */
   const [asr, setAsr] = useState<AsrState>(asrSnapshot())
   useEffect(() => asrSubscribe(setAsr), [])
+
+  /* 造物小窗：挂载后自动发一句，让方案批准后的 Agent 真跑一轮工具链。
+     ★ 只跑一次（autoSentRef 锁），StrictMode 双挂载也不会发两遍。
+     延时 400ms：等历史会话加载完、busyRef 归位，否则 send 会被
+     `busyRef.current` 闸吞掉。 */
+  const autoSentRef = useRef(false)
+  useEffect(() => {
+    if (!autoSend || autoSentRef.current) return
+    autoSentRef.current = true
+    const id = window.setTimeout(() => { void send(autoSend) }, 400)
+    return () => window.clearTimeout(id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSend])
 
   /* 按下麦克风那一刻输入框里已有的字。实时的字都接在它后面，
      这样「先打半句再补一句语音」不会把打好的冲掉。 */
@@ -1248,6 +1266,10 @@ export function Chat({
     setBusy(true)
     setErr('')
     setAtBottom(true)
+    /* 写一句需求 → AI 重新组织侧边栏。
+       只发信号，不在这里等模型：生成是后端 2~3 秒的事，
+       不能让对话回复等它。带原话给外层（外层调 /api/nav/generate）。 */
+    window.dispatchEvent(new CustomEvent('sd:nav-request', { detail: { text: q } }))
     const ac = new AbortController()
     acRef.current = ac
 
@@ -1300,6 +1322,8 @@ export function Chat({
         body: { text: forModel, confirmed: confirmed || null, focus: page },
         signal: ac.signal,
         onEvent: (o: StreamEvent) => {
+          /* 把真实 SSE 帧推给造物层的施工条 / 工具流水（只驱动显示，不驱动造物节奏） */
+          pushLive(o)
           const kind = o.t as string
           // retract：模型这一版被判定为「没查记忆就编」，整版作废。
           // 不清空 acc 的话，重答会接在旧文后面 —— 界面上同一句话说两遍。
@@ -1454,6 +1478,7 @@ export function Chat({
         body: { text: '', resume: true, focus: page },
         signal: ac.signal,
         onEvent: (o: StreamEvent) => {
+          pushLive(o)
           const kind = o.t as string
           if (kind === 'retract') { acc = ''; patchA({ text: '', steps: cloneSteps(steps) }); return }
           if (kind === 'token') { const d = (o.d as string) || ''; if (!d) return; acc += d; sealThink(steps); patchA({ text: acc, steps: cloneSteps(steps) }) }
@@ -1652,6 +1677,28 @@ export function Chat({
     return () => window.removeEventListener('sd:new-session', h as EventListener)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  /* 气泡「回到会话」：从别的页面跳回某条会话。
+     走后端 session_switch 换指针 + 重读历史，不重挂载组件。
+     ★ 之前 App 直接 setSid(b.session_id) 是错的：sid 是科目 id，
+       session_id 是会话 id，两个不能混，而且压根没通知 Chat。 */
+  useEffect(() => {
+    const h = async (ev: Event) => {
+      const id = String((ev as CustomEvent).detail?.sid || '').trim()
+      if (!id || id === curSid) return
+      const r = await callTool<any>('session_switch', { sid: id })
+      if (!r.ok) { setErr(r.error || '切不过去，原因没拿到'); return }
+      setCurSid(id)
+      const hist = await callTool<{ messages: any[] }>('agent_history', { limit: 60 })
+      setMsgs(hist.ok && hist.data?.messages ? normMsgs(hist.data.messages) : [])
+      setErr(''); setEditIdx(null)
+      loadSessions()
+      if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
+    }
+    window.addEventListener('sd:switch-session', h as EventListener)
+    return () => window.removeEventListener('sd:switch-session', h as EventListener)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [curSid])
 
   /* 还等着人回答的提问：最后一条带 ask 的消息。
      为什么要提到输入框上方：提问卡摆在消息流里，人滚上去才看得见，
@@ -1880,6 +1927,22 @@ export function Chat({
                             }
                             return c
                           })
+                          /* 批准 = 真的开工：由**当前这个** Chat 发那一句。
+                             ★ 以前改由切页后的 mini Chat 用 autoSend 发，
+                               结果多出一轮、两边消息对不上。实测组件卸载
+                               不会掐断已建立的 SSE（只有「停一下」才 abort），
+                               所以这里发是对的：一轮消息，主 Chat 和浮窗
+                               读同一份 agent_history。
+                             延后 60ms 避开 setMsgs 批处理；fireStageCue
+                             由 PlanCard 自己发，那边会再延后切页。 */
+                          if (st === 'approved') {
+                            window.setTimeout(() => {
+                              /* 方案正文从卡片读：没展开时 body 是空的，
+                                 PlanCard 那边补拉后通过 cue 带给 App，
+                                 这里只发一句简短的执行指令即可。 */
+                              void send('按这个方案开始做，直接执行')
+                            }, 60)
+                          }
                         }}
                       />
                     ))}
