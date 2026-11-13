@@ -2240,7 +2240,36 @@ def t_course_add(bvid=None, name=None, subject=None, score=None, kind="video", *
         _how = "新建了这一科"
     if _from:
         _how = "%s，%s" % (_how, _from)
-    title = str(name or vw.get("title") or bvid).strip()[:60]
+    # ★ 入库前核对：模型给的标题必须跟这个 BV 的真标题对得上。
+    #
+    # 踩过的坑（2026-11-13 实测）：模型把「【浙江大学】C语言入门与进阶 翁恺（全129讲）」
+    # 这个名字配给了一个完全无关的 BV（真实标题《拦个玩家折磨》，up 主「萌懂D曲奇」，
+    # 134 秒 1 P）。verify() 的三条核对全过了 —— 因为那份数据自身自洽，
+    # 只是「名字」和「内容」不是同一门课。结果课堂页「继续上一讲」显示
+    # 《拦个玩家折磨》，一眼就看出这库是脏的。
+    #
+    # 判据：中文按字、英文按词，算两个标题的重叠率。低于 0.25 就认定不是同一门课。
+    _real = str(vw.get("title") or "").strip()
+    _want = str(name or "").strip()
+    if _want and _real:
+        def _toks(s):
+            s = re.sub(r"\s+", "", s).lower()
+            s = re.sub(r"[【】\[\]（）()《》<>·、，,。.\-_/|:：!！?？\"'“”‘’]", "", s)
+            return set(s) if re.search(r"[\u4e00-\u9fff]", s) else set(s.split())
+        _a, _b = _toks(_want), _toks(_real)
+        if _a and _b:
+            _ov = len(_a & _b) / float(min(len(_a), len(_b)))
+            if _ov < 0.25:
+                return {"ok": False, "reason": (
+                    "标题和 BV 号对不上，先别入库。你给的是「%s」，"
+                    "但 %s 的真实标题是「%s」（UP：%s，%d 集）。"
+                    "多半是搜到的 BV 号配错了课程名 —— 重新搜一次再入库。"
+                    % (_want[:40], bvid, _real[:40],
+                       ((vw.get("owner") or {}).get("name")
+                        if isinstance(vw.get("owner"), dict) else "未知"),
+                       len(rows)))}
+
+    title = str(name or _real or bvid).strip()[:60]
     lessons = []
     for i, x in enumerate(rows):
         lessons.append({
@@ -2266,6 +2295,36 @@ def t_course_add(bvid=None, name=None, subject=None, score=None, kind="video", *
     subs.append(sub)
     tick("写进本机课程库（%d 讲）" % len(lessons), n=3, total=3)
     datahub.save_courses_extra({"subjects": subs})
+
+    # ★ 入库后自动挂到当前工作区（2026-11-13 实测踩到）。
+    #
+    # 以前 course_add 只写 courses_extra.json，不碰 workspace_subs。
+    # 空工作区里 AI 把课入库了，但 /api/base 的 subjects 还是 0 ——
+    # 界面上「还没有挂科目」，用户以为没成功，AI 又去重复搜课。
+    # 实测连录四次都是「课进库了、页面却是空的」。
+    #
+    # 为什么在这里挂而不是让 AI 再调一次 ws_set_subjects：
+    #   「把课加进本机」的语义本来就含「我要学它」，
+    #   而工作区是这套系统里唯一的容器 —— 不挂上去，这门课谁都看不见。
+    _wid = store.kv_get("ws.current") or ""
+    if _wid:
+        try:
+            _con = store.connect()
+            try:
+                _have = [r["subject_id"] for r in _con.execute(
+                    "SELECT subject_id FROM workspace_subs WHERE workspace_id=?",
+                    (_wid,)).fetchall()]
+                if base not in _have:
+                    _con.execute(
+                        "INSERT OR IGNORE INTO workspace_subs(workspace_id, subject_id, ord)"
+                        " VALUES(?,?,?)",
+                        (_wid, base, len(_have) + 1))
+                    _con.commit()
+            finally:
+                _con.close()
+        except Exception as _e:
+            _silent.log_squash(__name__, _e)
+
     mins = round(total / 60.0, 1)
     return {"ok": True, "subject": sid, "subject_id": base, "subject_name": sub_name,
             "name": title, "bvid": bvid, "lessons": len(lessons), "minutes": mins,
@@ -5727,8 +5786,19 @@ def _ws_filter(data):
       · 列表项有 subject 且不在本工作区 → 丢掉
       · 列表项有 workspace_id 且 ≠ 当前 → 丢掉
       · 没有这两个字段的条目原样保留（工具/配置类数据不该被工作区影响）
+
+    ★ 例外（2026-11-13 实测踩到，是「坑 11」的第五次）：
+      `bili_search` / `web_search` / `bili_verify` 这类**外部搜索**返回的候选
+      是 B 站/网上的东西，本来就不属于任何一个工作区。
+      但它们的候选列表字段也叫 `items`，于是被当成「本机数据」——
+      空工作区（没挂科目）时 `items` 被无条件清成 []，
+      模型只看到「搜到 5 门、156 小时」的 say，拿不到一个 BV 号，
+      连试四轮都入不了库。整段录制因此白跑。
+      所以：调用方给 data 打上 `no_ws_filter=True` 就跳过这一刀。
     """
     if not isinstance(data, dict):
+        return data
+    if data.get("no_ws_filter"):
         return data
     wid, subs = _ws_scope()
     if not wid or subs is None:
@@ -5955,12 +6025,15 @@ def t_bili_search(keyword=None, limit=12, **_):
     if not keyword or not str(keyword).strip():
         return {"ok": False, "reason": "给个词再搜，例如「专升本 高数」。"}
     r = bili.search(str(keyword).strip(), limit=int(limit or 12))
-    if isinstance(r, dict) and r.get("items"):
-        _n = len(r["items"])
-        _h = sum((it.get("secs") or 0) for it in r["items"]) / 3600.0
-        r["say"] = ("在 B 站搜到 %d 门「%s」，合起来 %.1f 小时。都是候选 —— "
-                    "时长/集数没核过，要入库先核一遍。" % (_n, keyword, _h))
-        r["effect"] = "%d candidates" % _n
+    if isinstance(r, dict):
+        # 外部候选，不属于任何工作区 —— 别让 _ws_filter 把 items 清空
+        r["no_ws_filter"] = True
+        if r.get("items"):
+            _n = len(r["items"])
+            _h = sum((it.get("secs") or 0) for it in r["items"]) / 3600.0
+            r["say"] = ("在 B 站搜到 %d 门「%s」，合起来 %.1f 小时。都是候选 —— "
+                        "时长/集数没核过，要入库先核一遍。" % (_n, keyword, _h))
+            r["effect"] = "%d candidates" % _n
     return r
 
 
