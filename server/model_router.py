@@ -204,13 +204,16 @@ def chat_stream(system, user, provider=None, model=None, temperature=None,
                 max_tokens=None, timeout=None, effort=None):
     """流式版 chat。逐个 yield {"d": 片段}，最后 yield {"done": True, "model": ...}。
 
-    只有 WorkBuddy / Trae 两家有流；自己的 Key 那家没接，如实说没接 ——
-    不假装流式再一次性吐出来。
+    三家都走流式：WorkBuddy / Trae 走 platform_ai 的流；自己的 Key（OpenAI 兼容）
+    走 llm.chat_stream。2026-11-13 之前「自己的 Key」这家没接流式，
+    而提交包内置的正是它，评委一说话就报错 —— 现已补齐。
     """
     provider = provider or current()
     model = model or model_of(provider)
     if provider == "apikey":
-        yield {"error": "「自己的 Key」这一家还没接流式；去上面模型列表换 WorkBuddy 或 Trae"}
+        for ev in llm.chat_stream(system, user, temperature=temperature,
+                                  max_tokens=max_tokens, timeout=timeout):
+            yield ev
         return
     for ev in platform_ai.chat_stream(provider, system, user, model=model,
                                       temperature=temperature, max_tokens=max_tokens,

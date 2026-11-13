@@ -22,6 +22,25 @@ APP_DATA_DIR = os.path.join(APP_DIR, "data")
 # 只读数据源：沿用旧工作台构建好的数据，不改不删
 SOURCE_DATA_DIR = os.path.join(PROJECT_ROOT, "workbench", "data")
 PROTO_DATA = os.path.join(PROJECT_ROOT, "outputs", "proto_data.json")
+
+# ---- 独立运行期的路径回退（2026-11-13）----
+# 上面两条指向仓库**上一级**的 workbench/outputs —— 那是开发期的历史布局。
+# 提交包（网盘分发的 zip）里没有这一层，直接解压会找不到 proto_data.json，
+# /api/base 直接 500，评委看到的是「打不开」。
+#
+# 规则：外部路径不存在时，回退到包内 data/ 下的同名文件；两边都没有才留空。
+# 为什么不是「一律用包内」：开发机上 workbench/data 里是 889 讲的真实数据，
+# 强行切到包内空目录会让正式实例变成空库 —— 回退只在外部缺失时触发，开发机零影响。
+def _pick(*candidates):
+    """返回第一个存在的路径；都不存在返回最后一个（保持可诊断的默认值）。"""
+    for p in candidates[:-1]:
+        if p and os.path.exists(p):
+            return p
+    return candidates[-1]
+
+
+SOURCE_DATA_DIR = _pick(SOURCE_DATA_DIR, APP_DATA_DIR)
+PROTO_DATA = _pick(PROTO_DATA, os.path.join(APP_DATA_DIR, "proto_data.json"))
 PROGRESS_JSON = os.path.join(SOURCE_DATA_DIR, "progress.json")
 EXAM_PAPERS = os.path.join(SOURCE_DATA_DIR, "exam_papers.json")
 # 考点卡真源（cs 98 条问答 + cs 505 条填空 + 政治 613 条简答，共 1216 条 Q/A）

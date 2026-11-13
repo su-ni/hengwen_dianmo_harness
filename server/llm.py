@@ -98,6 +98,92 @@ def chat(system, user, temperature=None, max_tokens=None, timeout=None, images=N
 _FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.M)
 
 
+def chat_stream(system, user, temperature=None, max_tokens=None, timeout=None,
+                images=None):
+    """流式版 chat：逐个 yield {"d": 文本片段}，结束 yield {"done": True, "model": ...}。
+
+    为什么要补这一段：此前只有 WorkBuddy / Trae 两家有流式，自己的 Key（OpenAI 兼容）
+    走的是非流式，界面上直接报「这一家还没接流式」。评委拿到的包内置的就是自己的 Key，
+    这条不通等于「下载包打开后用不了」，所以必须补。
+
+    OpenAI 兼容的 SSE 形状：`data: {"choices":[{"delta":{"content":"..."}}]}`，
+    以 `data: [DONE]` 收尾。兼容层（DeepSeek / 通义 / Kimi / ollama）都是这个形状，
+    因此这里不做供应商分支。
+
+    出错时不抛异常，yield 一个 {"error": ...} 让上层按既有方式展示 ——
+    和 platform_ai.chat_stream 的契约保持一致，调用方不用记两套。
+    """
+    ok, why = available()
+    if not ok:
+        yield {"error": why}
+        return
+
+    if config.LLM_MOCK:
+        # 与 chat() 同一套离线假答，逐段吐，保证链路口径一致
+        txt = _mock_text(user)
+        for i in range(0, len(txt), 24):
+            yield {"d": txt[i:i + 24]}
+        yield {"done": True, "model": "mock"}
+        return
+
+    url = config.LLM_BASE_URL.rstrip("/") + "/chat/completions"
+    _content, _img_errs = _vision.user_content(user, images)
+    payload = {
+        "model": config.LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": _content},
+        ],
+        "temperature": config.LLM_TEMPERATURE if temperature is None else temperature,
+        "max_tokens": config.LLM_MAX_TOKENS if max_tokens is None else max_tokens,
+        "stream": True,
+    }
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "Authorization": "Bearer " + config.LLM_API_KEY,
+        "Accept": "text/event-stream",
+    }
+    try:
+        r = requests.post(url, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                          headers=headers, timeout=config.LLM_TIMEOUT if timeout is None else timeout,
+                          stream=True)
+    except Exception as e:
+        yield {"error": "请求发不出去：%s" % str(e)[:120]}
+        return
+
+    if r.status_code != 200:
+        yield {"error": "模型返回 HTTP %d：%s" % (r.status_code, (r.text or "")[:160])}
+        return
+
+    # 逐行读 SSE。用 iter_lines 而不是自己切 buffer：requests 已经处理了跨包半行。
+    try:
+        for raw in r.iter_lines(decode_unicode=True):
+            if not raw:
+                continue
+            line = raw.strip()
+            if not line.startswith("data:"):
+                continue                      # 忽略 event: / id: / 注释行
+            body = line[5:].strip()
+            if body == "[DONE]":
+                break
+            try:
+                obj = json.loads(body)
+            except Exception:
+                continue                       # 半包/心跳脏行，跳过不中断
+            try:
+                delta = obj["choices"][0].get("delta") or {}
+                piece = delta.get("content")
+            except Exception:
+                piece = None
+            if piece:
+                yield {"d": piece}
+    except Exception as e:
+        yield {"error": "流式中断：%s" % str(e)[:120]}
+        return
+
+    yield {"done": True, "model": config.LLM_MODEL}
+
+
 def parse_json(text):
     """从模型回复里抠出 JSON。模型经常在前后加解释或代码围栏，这里全兜住。
 
