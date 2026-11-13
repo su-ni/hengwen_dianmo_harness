@@ -684,6 +684,10 @@ export function Agent({ base }: { base: Base }) {
 
             <div className="set-group">许可与来源</div>
             <Row title="本项目" sub="个人项目，仅限学习交流使用。" />
+            <Row title="源码仓库"
+              sub={<span>github.com/su-ni/hengwen_dianmo_harness　·　公开仓库，只含源码与配置模板</span>}
+              act={<a className="pbtn-mn ghost" href="https://github.com/su-ni/hengwen_dianmo_harness"
+                target="_blank" rel="noreferrer">打开</a>} />
             <Row title="光环控制台视觉" sub="HALOFLUX（作者 Ryder191），PolyForm Noncommercial 1.0.0；原始声明与 LICENSE 保留在 web/halo/。" />
           </>
         )}
