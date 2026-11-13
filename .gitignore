@@ -7,10 +7,17 @@
 #    备份、截图、AI 生成题 —— 含个人数据且体积大，不入库
 data/
 data-blank/
+# data-* 派生实例（data-clean 等）：第二份数据目录，里面同样有 ai_cred 登录态
+data-*/
 sync/
 
 # 2) 密钥与本机配置（API 密钥不进仓库）
 server/config.local.json
+# config.clean.json / config.blank.json 等实例配置：MDSA_CONFIG 指向的第二份配置，
+# 含本机绝对路径与 token 明文。2026-11-13 排查发现 config.blank.json 曾带真 token 入库，
+# 已用 filter-repo 从全部历史中抹除，并在此永久排除同类文件。
+server/config.*.json
+!server/config.example.json
 *.local.json
 .env
 .env.*
